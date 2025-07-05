@@ -17,8 +17,10 @@ import (
 
 // RewriteState 定义了我们工作流图的状态。
 type RewriteState struct {
-	OriginalQuery string
-	Decision      string // "valid" (有效) or "invalid" (无效)
+	OriginalQuery  string
+	Decision       string // "valid" (有效) or "invalid" (无效)
+	RewrittenQuery string
+	Intent         string
 }
 
 // NewConditionalRewriterGraph 创建并编译一个条件重写工作流图。
@@ -304,80 +306,205 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 	)
 	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt, compose.WithNodeName("重写器提示词"))
 
-	// 新增：合并重写与意图识别的节点 (有效分支)
-	_ = sg.AddLambdaNode("rewrite_and_classify_stream", compose.StreamableLambda(
-		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[string], error) {
-			// 1. 获取重写后的查询流
-			rewriteStream, err := chatModel.Stream(ctx, messages)
+	_ = sg.AddLambdaNode("rewriter_model_stream_agg", compose.StreamableLambda(
+		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
+			stream, err := chatModel.Stream(ctx, messages)
 			if err != nil {
 				return nil, fmt.Errorf("streaming chat model for rewriter failed: %w", err)
 			}
-
-			// 2. 聚合重写后的查询
-			var rewriteContent strings.Builder
+			var fullContent strings.Builder
 			for {
-				chunk, err := rewriteStream.Recv()
+				chunk, err := stream.Recv()
 				if err != nil {
 					if err == io.EOF {
 						break
 					}
 					return nil, err
 				}
-				rewriteContent.WriteString(chunk.Content)
+				fullContent.WriteString(chunk.Content)
 			}
-			rewrittenQuery := rewriteContent.String()
-			fmt.Printf("重写后的查询: %s\n", rewrittenQuery)
-
-			// 3. 准备意图分类
-			intentClassifierPromptTpl := prompt.FromMessages(
-				schema.FString,
-				schema.SystemMessage("你是一个意图分类器。根据用户问题判断意图场景。1、若用户的问题属于学生守则类的场景, 返回'学生守则'；2、若用户的问题属于员工规范类的场景，则返回'员工规范'；3、否则属于其他场景，返回'其他'。请只返回这三个词中的一个。"),
-				schema.UserMessage("用户问题: {input}"),
-			)
-			intentMessages, err := intentClassifierPromptTpl.Format(ctx, map[string]any{"input": rewrittenQuery})
-			if err != nil {
-				return nil, fmt.Errorf("formatting intent prompt failed: %w", err)
-			}
-
-			// 4. 获取意图分类流
-			intentStream, err := chatModel.Stream(ctx, intentMessages)
-			if err != nil {
-				return nil, fmt.Errorf("streaming chat model for intent classifier failed: %w", err)
-			}
-
-			// 5. 聚合意图分类结果
-			var intentContent strings.Builder
-			for {
-				chunk, err := intentStream.Recv()
-				if err != nil {
-					if err == io.EOF {
-						break
-					}
-					return nil, err
-				}
-				intentContent.WriteString(chunk.Content)
-			}
-			intent := strings.TrimSpace(intentContent.String())
-			fmt.Printf("意图分类器判定: %s\n", intent)
-
-			// 6. 格式化最终输出
-			var output string
-			switch {
-			case strings.Contains(intent, "学生守则"):
-				output = "意图识别场景1:学生守则类"
-			case strings.Contains(intent, "员工规范"):
-				output = "意图识别场景2:员工规范类"
-			default:
-				output = "意图识别场景3:其他类场景"
-			}
-
-			// 7. 将最终输出作为流返回
-			sr, sw := schema.Pipe[string](1)
-			sw.Send(output, nil)
+			finalMessage := &schema.Message{Role: schema.Assistant, Content: fullContent.String()}
+			fmt.Printf("重写后的查询: %s\n", finalMessage.Content)
+			sr, sw := schema.Pipe[*schema.Message](1)
+			sw.Send(finalMessage, nil)
 			sw.Close()
 			return sr, nil
 		},
-	), compose.WithNodeName("重写与意图识别(流式)"))
+	), compose.WithNodeName("重写器模型(聚合)"))
+
+	_ = sg.AddLambdaNode("store_rewritten_query", compose.StreamableLambda(
+		func(ctx context.Context, msg *schema.Message) (*schema.StreamReader[*schema.Message], error) {
+			sr, sw := schema.Pipe[*schema.Message](1)
+			sw.Send(msg, nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithStatePostHandler(func(ctx context.Context, msg *schema.Message, state *RewriteState) (*schema.Message, error) {
+		state.RewrittenQuery = msg.Content
+		return msg, nil
+	}), compose.WithNodeName("存储重写查询"))
+
+	_ = sg.AddLambdaNode("prepare_intent_classifier_input", compose.StreamableLambda(
+		func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[map[string]any], error) {
+			var rewrittenQuery string
+			err := compose.ProcessState(ctx, func(ctx context.Context, state *RewriteState) error {
+				rewrittenQuery = state.RewrittenQuery
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			sr, sw := schema.Pipe[map[string]any](1)
+			sw.Send(map[string]any{"input": rewrittenQuery}, nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithNodeName("准备意图分类输入"))
+
+	intentClassifierPrompt := prompt.FromMessages(
+		schema.FString,
+		schema.SystemMessage("你是一个意图分类器。根据用户问题判断意图场景。1、若用户的问题属于学生守则类的场景, 返回'学生守则'；2、若用户的问题属于员工规范类的场景，则返回'员工规范'；3、否则属于其他场景，返回'其他'。请只返回这三个词中的一个。"),
+		schema.UserMessage("用户问题: {input}"),
+	)
+	_ = sg.AddChatTemplateNode("intent_classifier_prompt", intentClassifierPrompt, compose.WithNodeName("意图分类器提示词"))
+
+	_ = sg.AddLambdaNode("intent_classifier_model_stream", compose.StreamableLambda(
+		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
+			stream, err := chatModel.Stream(ctx, messages)
+			if err != nil {
+				return nil, fmt.Errorf("streaming chat model for intent classifier failed: %w", err)
+			}
+			var fullContent strings.Builder
+			for {
+				chunk, err := stream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return nil, err
+				}
+				fullContent.WriteString(chunk.Content)
+			}
+			finalMessage := &schema.Message{Role: schema.Assistant, Content: fullContent.String()}
+			fmt.Printf("意图分类器判定: %s\n", finalMessage.Content)
+			sr, sw := schema.Pipe[*schema.Message](1)
+			sw.Send(finalMessage, nil)
+			sw.Close()
+			return sr, nil
+		},
+	), compose.WithNodeName("意图分类器模型(聚合)"))
+
+	_ = sg.AddLambdaNode("store_intent", compose.StreamableLambda(
+		func(ctx context.Context, msg *schema.Message) (*schema.StreamReader[*schema.Message], error) {
+			sr, sw := schema.Pipe[*schema.Message](1)
+			sw.Send(msg, nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithStatePostHandler(func(ctx context.Context, msg *schema.Message, state *RewriteState) (*schema.Message, error) {
+		state.Intent = strings.TrimSpace(msg.Content)
+		return msg, nil
+	}), compose.WithNodeName("存储意图"))
+
+	// --- Student Rules Branch ---
+	_ = sg.AddLambdaNode("prepare_student_rules_input", compose.StreamableLambda(
+		func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[map[string]any], error) {
+			var rewrittenQuery string
+			err := compose.ProcessState(ctx, func(ctx context.Context, state *RewriteState) error {
+				rewrittenQuery = state.RewrittenQuery
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			sr, sw := schema.Pipe[map[string]any](1)
+			sw.Send(map[string]any{"input": rewrittenQuery}, nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithNodeName("准备学生守则输入"))
+
+	studentRulesPrompt := prompt.FromMessages(
+		schema.FString,
+		schema.SystemMessage("你是一个AI助手，专门回答关于学生守则的问题。请根据用户的问题，提供详细和准确的回答。"),
+		schema.UserMessage("问题: {input}"),
+	)
+	_ = sg.AddChatTemplateNode("student_rules_prompt", studentRulesPrompt, compose.WithNodeName("学生守则提示词"))
+
+	_ = sg.AddLambdaNode("student_rules_model_stream", compose.StreamableLambda(
+		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[string], error) {
+			stream, err := chatModel.Stream(ctx, messages)
+			if err != nil {
+				return nil, fmt.Errorf("streaming student rules model failed: %w", err)
+			}
+			sr, sw := schema.Pipe[string](10) // Use a buffer
+			go func() {
+				defer sw.Close()
+				for {
+					chunk, err := stream.Recv()
+					if err != nil {
+						if err != io.EOF {
+							log.Printf("Error receiving from student rules stream: %v", err)
+						}
+						return
+					}
+					sw.Send(chunk.Content, nil)
+				}
+			}()
+			return sr, nil
+		}), compose.WithNodeName("学生守则模型(流式)"))
+
+	// --- Employee Rules Branch ---
+	_ = sg.AddLambdaNode("prepare_employee_rules_input", compose.StreamableLambda(
+		func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[map[string]any], error) {
+			var rewrittenQuery string
+			err := compose.ProcessState(ctx, func(ctx context.Context, state *RewriteState) error {
+				rewrittenQuery = state.RewrittenQuery
+				return nil
+			})
+			if err != nil {
+				return nil, err
+			}
+			sr, sw := schema.Pipe[map[string]any](1)
+			sw.Send(map[string]any{"input": rewrittenQuery}, nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithNodeName("准备员工规范输入"))
+
+	employeeRulesPrompt := prompt.FromMessages(
+		schema.FString,
+		schema.SystemMessage("你是一位HR专家，请根据员工规范回答员工的提问。确保回答专业、准确，并符合公司政策。"),
+		schema.UserMessage("问题: {input}"),
+	)
+	_ = sg.AddChatTemplateNode("employee_rules_prompt", employeeRulesPrompt, compose.WithNodeName("员工规范提示词"))
+
+	_ = sg.AddLambdaNode("employee_rules_model_stream", compose.StreamableLambda(
+		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[string], error) {
+			stream, err := chatModel.Stream(ctx, messages)
+			if err != nil {
+				return nil, fmt.Errorf("streaming employee rules model failed: %w", err)
+			}
+			sr, sw := schema.Pipe[string](10) // Use a buffer
+			go func() {
+				defer sw.Close()
+				for {
+					chunk, err := stream.Recv()
+					if err != nil {
+						if err != io.EOF {
+							log.Printf("Error receiving from employee rules stream: %v", err)
+						}
+						return
+					}
+					sw.Send(chunk.Content, nil)
+				}
+			}()
+			return sr, nil
+		}), compose.WithNodeName("员工规范模型(流式)"))
+
+	// --- Other Scenario Branch ---
+	_ = sg.AddLambdaNode("other_scenario_output", compose.StreamableLambda(
+		func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[string], error) {
+			sr, sw := schema.Pipe[string](1)
+			sw.Send("意图识别场景3:其他类场景", nil)
+			sw.Close()
+			return sr, nil
+		}), compose.WithNodeName("其他场景输出"))
 
 	// 直通节点 (无效分支)
 	_ = sg.AddLambdaNode("passthrough_node", compose.StreamableLambda(func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[string], error) {
@@ -426,8 +553,52 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 
 	// 有效分支的边
 	_ = sg.AddEdge("prepare_rewriter_input", "rewriter_prompt")
-	_ = sg.AddEdge("rewriter_prompt", "rewrite_and_classify_stream")
-	_ = sg.AddEdge("rewrite_and_classify_stream", compose.END)
+	_ = sg.AddEdge("rewriter_prompt", "rewriter_model_stream_agg")
+	_ = sg.AddEdge("rewriter_model_stream_agg", "store_rewritten_query")
+	_ = sg.AddEdge("store_rewritten_query", "prepare_intent_classifier_input")
+	_ = sg.AddEdge("prepare_intent_classifier_input", "intent_classifier_prompt")
+	_ = sg.AddEdge("intent_classifier_prompt", "intent_classifier_model_stream")
+	_ = sg.AddEdge("intent_classifier_model_stream", "store_intent")
+
+	// 意图条件分支
+	_ = sg.AddBranch("store_intent", compose.NewGraphBranch(
+		func(ctx context.Context, input *schema.Message) (string, error) {
+			var intent string
+			err := compose.ProcessState(ctx, func(ctx context.Context, state *RewriteState) error {
+				intent = state.Intent
+				return nil
+			})
+			if err != nil {
+				return "", err
+			}
+			switch {
+			case strings.Contains(intent, "学生守则"):
+				return "prepare_student_rules_input", nil
+			case strings.Contains(intent, "员工规范"):
+				return "prepare_employee_rules_input", nil
+			default:
+				return "other_scenario_output", nil
+			}
+		},
+		map[string]bool{
+			"prepare_student_rules_input":  true,
+			"prepare_employee_rules_input": true,
+			"other_scenario_output":        true,
+		},
+	))
+
+	// 学生守则分支的边
+	_ = sg.AddEdge("prepare_student_rules_input", "student_rules_prompt")
+	_ = sg.AddEdge("student_rules_prompt", "student_rules_model_stream")
+	_ = sg.AddEdge("student_rules_model_stream", compose.END)
+
+	// 员工规范分支的边
+	_ = sg.AddEdge("prepare_employee_rules_input", "employee_rules_prompt")
+	_ = sg.AddEdge("employee_rules_prompt", "employee_rules_model_stream")
+	_ = sg.AddEdge("employee_rules_model_stream", compose.END)
+
+	// 其他场景分支的边
+	_ = sg.AddEdge("other_scenario_output", compose.END)
 
 	// 无效分支的边
 	_ = sg.AddEdge("passthrough_node", compose.END)
