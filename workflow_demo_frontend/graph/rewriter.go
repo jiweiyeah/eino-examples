@@ -26,7 +26,7 @@ type RewriteState struct {
 // NewConditionalRewriterGraph 创建并编译一个条件重写工作流图。
 func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, string], error) {
 	// 加载 .env 文件
-	err := godotenv.Load("../.env")
+	err := godotenv.Load(".env")
 	if err != nil {
 		// 允许在没有 .env 文件的情况下运行
 	}
@@ -173,7 +173,7 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 // NewConditionalRewriterGraphStream 创建并编译一个支持流式输出的条件重写工作流图。
 func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[string, string], error) {
 	// 加载 .env 文件
-	err := godotenv.Load("../.env")
+	err := godotenv.Load(".env")
 	if err != nil {
 		// 允许在没有 .env 文件的情况下运行
 	}
