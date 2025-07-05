@@ -228,7 +228,6 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		schema.UserMessage("用户输入: {input}"),
 	)
 	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt, compose.WithNodeName("分类器提示词"))
-	// 因为AI模型只支持流式，使用StreamableLambda。
 	// 这个lambda调用流式端点并聚合结果为单个消息。
 	_ = sg.AddLambdaNode("classifier_model_stream", compose.StreamableLambda(
 		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[*schema.Message], error) {
@@ -297,39 +296,88 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		return sr, nil
 	}), compose.WithNodeName("准备重写器输入(流式)"))
 
-	// 重写器节点 (有效分支)
+	// 重写器提示节点 (有效分支)
 	rewriterPrompt := prompt.FromMessages(
 		schema.FString,
 		schema.SystemMessage("你是一位专业的查询重写专家。请将用户的问题改写得更清晰、更适合搜索引擎。"),
 		schema.UserMessage("用户问题: {input}"),
 	)
 	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt, compose.WithNodeName("重写器提示词"))
-	_ = sg.AddLambdaNode("rewriter_model_stream", compose.StreamableLambda(
+
+	// 新增：合并重写与意图识别的节点 (有效分支)
+	_ = sg.AddLambdaNode("rewrite_and_classify_stream", compose.StreamableLambda(
 		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[string], error) {
-			stream, err := chatModel.Stream(ctx, messages)
+			// 1. 获取重写后的查询流
+			rewriteStream, err := chatModel.Stream(ctx, messages)
 			if err != nil {
-				return nil, fmt.Errorf("streaming chat model failed: %w", err)
+				return nil, fmt.Errorf("streaming chat model for rewriter failed: %w", err)
 			}
 
-			sr, sw := schema.Pipe[string](0)
-
-			go func() {
-				defer sw.Close()
-				for {
-					chunk, err := stream.Recv()
-					if err != nil {
-						if err != io.EOF {
-							// Propagate error to the stream
-							sw.Send("", err)
-						}
-						return
+			// 2. 聚合重写后的查询
+			var rewriteContent strings.Builder
+			for {
+				chunk, err := rewriteStream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						break
 					}
-					sw.Send(chunk.Content, nil)
+					return nil, err
 				}
-			}()
+				rewriteContent.WriteString(chunk.Content)
+			}
+			rewrittenQuery := rewriteContent.String()
+			fmt.Printf("重写后的查询: %s\n", rewrittenQuery)
+
+			// 3. 准备意图分类
+			intentClassifierPromptTpl := prompt.FromMessages(
+				schema.FString,
+				schema.SystemMessage("你是一个意图分类器。根据用户问题判断意图场景。1、若用户的问题属于学生守则类的场景, 返回'学生守则'；2、若用户的问题属于员工规范类的场景，则返回'员工规范'；3、否则属于其他场景，返回'其他'。请只返回这三个词中的一个。"),
+				schema.UserMessage("用户问题: {input}"),
+			)
+			intentMessages, err := intentClassifierPromptTpl.Format(ctx, map[string]any{"input": rewrittenQuery})
+			if err != nil {
+				return nil, fmt.Errorf("formatting intent prompt failed: %w", err)
+			}
+
+			// 4. 获取意图分类流
+			intentStream, err := chatModel.Stream(ctx, intentMessages)
+			if err != nil {
+				return nil, fmt.Errorf("streaming chat model for intent classifier failed: %w", err)
+			}
+
+			// 5. 聚合意图分类结果
+			var intentContent strings.Builder
+			for {
+				chunk, err := intentStream.Recv()
+				if err != nil {
+					if err == io.EOF {
+						break
+					}
+					return nil, err
+				}
+				intentContent.WriteString(chunk.Content)
+			}
+			intent := strings.TrimSpace(intentContent.String())
+			fmt.Printf("意图分类器判定: %s\n", intent)
+
+			// 6. 格式化最终输出
+			var output string
+			switch {
+			case strings.Contains(intent, "学生守则"):
+				output = "意图识别场景1:学生守则类"
+			case strings.Contains(intent, "员工规范"):
+				output = "意图识别场景2:员工规范类"
+			default:
+				output = "意图识别场景3:其他类场景"
+			}
+
+			// 7. 将最终输出作为流返回
+			sr, sw := schema.Pipe[string](1)
+			sw.Send(output, nil)
+			sw.Close()
 			return sr, nil
 		},
-	), compose.WithNodeName("重写器模型(流式)"))
+	), compose.WithNodeName("重写与意图识别(流式)"))
 
 	// 直通节点 (无效分支)
 	_ = sg.AddLambdaNode("passthrough_node", compose.StreamableLambda(func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[string], error) {
@@ -378,8 +426,8 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 
 	// 有效分支的边
 	_ = sg.AddEdge("prepare_rewriter_input", "rewriter_prompt")
-	_ = sg.AddEdge("rewriter_prompt", "rewriter_model_stream")
-	_ = sg.AddEdge("rewriter_model_stream", compose.END)
+	_ = sg.AddEdge("rewriter_prompt", "rewrite_and_classify_stream")
+	_ = sg.AddEdge("rewrite_and_classify_stream", compose.END)
 
 	// 无效分支的边
 	_ = sg.AddEdge("passthrough_node", compose.END)
