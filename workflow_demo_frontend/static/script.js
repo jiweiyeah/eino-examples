@@ -7,9 +7,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const mobileNavBtn = document.getElementById("mobile-nav");
   const sidebar = document.getElementById("sidebar");
   const mainContent = document.getElementById("main-content");
+  const historyList = document.createElement("div");
+  historyList.className = "history-list";
+  sidebar.insertBefore(historyList, sidebar.querySelector(".sidebar-footer"));
 
   // 存储聊天历史
-  const chatMessages = [];
+  let chatMessages = [];
+  let currentChatId = null;
 
   // 处理侧边栏切换
   mobileNavBtn.addEventListener("click", () => {
@@ -18,13 +22,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 新对话按钮
   newChatBtn.addEventListener("click", () => {
-    // 清空聊天历史
-    while (chatContainer.children.length > 1) {
-      chatContainer.removeChild(chatContainer.lastChild);
-    }
-    // 清空存储的消息
-    chatMessages.length = 0;
+    clearChat();
+    currentChatId = null;
+    chatMessages = [];
     userInput.focus();
+    // 取消历史记录的选中状态
+    const activeItem = historyList.querySelector(".history-item.active");
+    if (activeItem) {
+      activeItem.classList.remove("active");
+    }
   });
 
   // 动态调整文本域高度
@@ -51,6 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 添加用户消息到聊天界面
     addUserMessage(message);
+    chatMessages.push({ role: "user", content: message });
 
     // 显示AI正在输入的指示器
     const typingIndicator = addTypingIndicator();
@@ -69,6 +76,13 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  function clearChat() {
+    // 清空聊天历史
+    while (chatContainer.children.length > 1) {
+      chatContainer.removeChild(chatContainer.lastChild);
+    }
+  }
+
   // 添加用户消息到聊天界面
   function addUserMessage(message) {
     const messageElement = document.createElement("div");
@@ -83,9 +97,6 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
 
     chatContainer.appendChild(messageElement);
-
-    // 保存消息到历史记录
-    chatMessages.push({ role: "user", content: message });
 
     // 滚动到底部
     scrollToBottom();
@@ -105,9 +116,6 @@ document.addEventListener("DOMContentLoaded", () => {
     `;
 
     chatContainer.appendChild(messageElement);
-
-    // 保存消息到历史记录
-    chatMessages.push({ role: "assistant", content: message });
 
     // 滚动到底部
     scrollToBottom();
@@ -220,6 +228,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // 保存消息到历史记录
       chatMessages.push({ role: "assistant", content: aiResponse });
+      await saveChat();
     } catch (error) {
       console.error("处理响应时出错:", error);
       throw error;
@@ -250,7 +259,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // 处理代码块 (```code```)
     formatted = formatted.replace(
       /```([\s\S]*?)```/g,
-      "<pre><code>$1</code></pre>"
+      '<pre class="code-block"><code>$1</code></pre>'
     );
 
     // 处理内联代码 (`code`)
@@ -282,6 +291,104 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // 初始聚焦到输入框
-  userInput.focus();
+  // 滚动时隐藏/显示侧边栏
+  mainContent.addEventListener("scroll", () => {
+    if (mainContent.scrollTop > 50) {
+      mobileNavBtn.classList.add("scrolled");
+    } else {
+      mobileNavBtn.classList.remove("scrolled");
+    }
+  });
+
+  async function saveChat() {
+    if (currentChatId === null) {
+      currentChatId = Date.now().toString();
+      const title = chatMessages[0].content.substring(0, 30);
+      addHistoryItem({ id: currentChatId, title: title }, true);
+    }
+
+    try {
+      await fetch("/api/history", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: currentChatId,
+          messages: chatMessages,
+        }),
+      });
+    } catch (error) {
+      console.error("保存聊天记录失败:", error);
+    }
+  }
+
+  async function loadHistory() {
+    try {
+      const response = await fetch("/api/history");
+      const history = await response.json();
+      historyList.innerHTML = "";
+      history.forEach((item) => addHistoryItem(item));
+    } catch (error) {
+      console.error("加载历史记录失败:", error);
+    }
+  }
+
+  function addHistoryItem(item, isActive = false) {
+    const historyItem = document.createElement("div");
+    historyItem.className = "history-item";
+    historyItem.textContent = item.title;
+    historyItem.dataset.id = item.id;
+
+    if (isActive) {
+      historyItem.classList.add("active");
+    }
+
+    historyItem.addEventListener("click", () => {
+      loadChat(item.id);
+    });
+
+    historyList.prepend(historyItem);
+    if (isActive) {
+      const activeItem = historyList.querySelector(".history-item.active");
+      if (activeItem) {
+        activeItem.classList.remove("active");
+      }
+      historyItem.classList.add("active");
+    }
+  }
+
+  async function loadChat(id) {
+    try {
+      const response = await fetch(`/api/history/${id}`);
+      const messages = await response.json();
+
+      clearChat();
+      chatMessages = messages;
+      currentChatId = id;
+
+      messages.forEach((msg) => {
+        if (msg.role === "user") {
+          addUserMessage(msg.content);
+        } else {
+          addAIMessage(msg.content);
+        }
+      });
+
+      // 设置当前激活的历史记录项
+      const activeItem = historyList.querySelector(".history-item.active");
+      if (activeItem) {
+        activeItem.classList.remove("active");
+      }
+      const newItem = historyList.querySelector(`[data-id="${id}"]`);
+      if (newItem) {
+        newItem.classList.add("active");
+      }
+    } catch (error) {
+      console.error("加载聊天记录失败:", error);
+    }
+  }
+
+  // 初始加载
+  loadHistory();
 });
