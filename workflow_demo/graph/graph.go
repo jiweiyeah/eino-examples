@@ -25,21 +25,29 @@ import (
 	"github.com/cloudwego/eino-examples/internal/logs"
 )
 
-// RegisterSimpleGraph 注册一个简单的图
-func RegisterSimpleGraph(ctx context.Context) {
+// NewSimpleGraph 编译一个简单的图并返回可运行实例
+func NewSimpleGraph(ctx context.Context) (compose.Runnable[string, string], error) {
 	// 创建一个新图，输入和输出都是字符串类型
 	g := compose.NewGraph[string, string]()
 
 	// 添加一个 lambda 节点 "node_1"
 	_ = g.AddLambdaNode("node_1", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " 由节点1处理,", nil
+		logs.Infof("--- 节点 1 ---")
+		logs.Infof("输入: %s", input)
+		output = input + " 由节点1处理,"
+		logs.Infof("输出: %s", output)
+		return output, nil
 	}))
 
 	// 创建一个子图 sg
 	sg := compose.NewGraph[string, string]()
 	// 在子图中添加一个 lambda 节点 "sg_node_1"
 	_ = sg.AddLambdaNode("sg_node_1", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " 由sg_node_1处理,", nil
+		logs.Infof("--- 节点 2 (子图 sg_node_1) ---")
+		logs.Infof("输入: %s", input)
+		output = input + " 由sg_node_1处理,"
+		logs.Infof("输出: %s", output)
+		return output, nil
 	}))
 
 	// 在子图中添加入口到 "sg_node_1" 的边
@@ -53,7 +61,11 @@ func RegisterSimpleGraph(ctx context.Context) {
 
 	// 在父图 g 中添加一个 lambda 节点 "node_3"
 	_ = g.AddLambdaNode("node_3", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " 由节点3处理,", nil
+		logs.Infof("--- 节点 3 ---")
+		logs.Infof("输入: %s", input)
+		output = input + " 由节点3处理,"
+		logs.Infof("输出: %s", output)
+		return output, nil
 	}))
 
 	// 在父图 g 中添加入口到 "node_1" 的边
@@ -69,20 +81,7 @@ func RegisterSimpleGraph(ctx context.Context) {
 	_ = g.AddEdge("node_3", compose.END)
 
 	// 编译图
-	r, err := g.Compile(ctx)
-	if err != nil {
-		logs.Errorf("编译图失败, err=%v", err)
-		return
-	}
-
-	// 调用已编译的图
-	message, err := r.Invoke(ctx, "eino graph test")
-	if err != nil {
-		logs.Errorf("调用图失败, err=%v", err)
-		return
-	}
-
-	logs.Infof("eino 简单图的输出是: %v", message)
+	return g.Compile(ctx)
 }
 
 // When using eino debugging plugin, in the input box, you need to specify the concrete type of 'any' in map[string]any. For example, you can input the following data for debugging:

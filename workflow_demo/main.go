@@ -17,9 +17,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/cloudwego/eino-ext/devops"
@@ -39,7 +42,26 @@ func main() {
 	}
 
 	// Register chain, graph and state_graph for demo use
-	graph.RegisterSimpleGraph(ctx)
+	// 编译工作流图
+	simpleGraph, err := graph.NewSimpleGraph(ctx)
+	if err != nil {
+		logs.Errorf("编译图失败, err: %v", err)
+		return
+	}
+
+	// 从控制台读取输入
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("请输入内容: ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	// 使用输入内容调用工作流
+	res, err := simpleGraph.Invoke(ctx, input)
+	if err != nil {
+		logs.Errorf("调用图失败, err: %v", err)
+		return
+	}
+	logs.Infof("工作流输出: %s", res)
 
 	// 阻塞进程退出
 	sigs := make(chan os.Signal, 1)
