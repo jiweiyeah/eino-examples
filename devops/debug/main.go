@@ -32,24 +32,24 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Init eino devops server
+	// 初始化 eino devops 服务
 	err := devops.Init(ctx)
 	if err != nil {
-		logs.Errorf("[eino dev] init failed, err=%v", err)
+		logs.Errorf("[eino dev] 初始化失败, err=%v", err)
 		return
 	}
 
-	// Register chain, graph and state_graph for demo use
+	// 注册 chain、graph 和 state_graph 用于演示
 	chain.RegisterSimpleChain(ctx)
 	graph.RegisterSimpleGraph(ctx)
 	graph.RegisterSimpleStateGraph(ctx)
 	graph.RegisterAnyInputGraph(ctx)
 
-	// Blocking process exits
+	// 阻塞进程退出
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	<-sigs
 
-	// Exit
-	logs.Infof("[eino dev] shutting down\n")
+	// 退出
+	logs.Infof("[eino dev] 关闭\n")
 }

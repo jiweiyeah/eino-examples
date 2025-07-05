@@ -25,52 +25,68 @@ import (
 	"github.com/cloudwego/eino-examples/internal/logs"
 )
 
+// RegisterSimpleGraph 注册一个简单的图
 func RegisterSimpleGraph(ctx context.Context) {
+	// 创建一个新图，输入和输出都是字符串类型
 	g := compose.NewGraph[string, string]()
 
+	// 添加一个 lambda 节点 "node_1"
 	_ = g.AddLambdaNode("node_1", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " process by node_1,", nil
+		return input + " 由节点1处理,", nil
 	}))
 
+	// 创建一个子图 sg
 	sg := compose.NewGraph[string, string]()
+	// 在子图中添加一个 lambda 节点 "sg_node_1"
 	_ = sg.AddLambdaNode("sg_node_1", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " process by sg_node_1,", nil
+		return input + " 由sg_node_1处理,", nil
 	}))
 
+	// 在子图中添加入口到 "sg_node_1" 的边
 	_ = sg.AddEdge(compose.START, "sg_node_1")
 
+	// 在子图中添加 "sg_node_1" 到出口的边
 	_ = sg.AddEdge("sg_node_1", compose.END)
 
+	// 将子图 sg 添加为父图 g 的一个节点 "node_2"
 	_ = g.AddGraphNode("node_2", sg)
 
+	// 在父图 g 中添加一个 lambda 节点 "node_3"
 	_ = g.AddLambdaNode("node_3", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " process by node_3,", nil
+		return input + " 由节点3处理,", nil
 	}))
 
+	// 在父图 g 中添加入口到 "node_1" 的边
 	_ = g.AddEdge(compose.START, "node_1")
 
+	// 在父图 g 中添加 "node_1" 到 "node_2" 的边
 	_ = g.AddEdge("node_1", "node_2")
 
+	// 在父图 g 中添加 "node_2" 到 "node_3" 的边
 	_ = g.AddEdge("node_2", "node_3")
 
+	// 在父图 g 中添加 "node_3" 到出口的边
 	_ = g.AddEdge("node_3", compose.END)
 
+	// 编译图
 	r, err := g.Compile(ctx)
 	if err != nil {
-		logs.Errorf("compile graph failed, err=%v", err)
+		logs.Errorf("编译图失败, err=%v", err)
 		return
 	}
 
+	// 调用已编译的图
 	message, err := r.Invoke(ctx, "eino graph test")
 	if err != nil {
-		logs.Errorf("invoke graph failed, err=%v", err)
+		logs.Errorf("调用图失败, err=%v", err)
 		return
 	}
 
-	logs.Infof("eino simple graph output is: %v", message)
+	logs.Infof("eino 简单图的输出是: %v", message)
 }
 
 // When using eino debugging plugin, in the input box, you need to specify the concrete type of 'any' in map[string]any. For example, you can input the following data for debugging:
+// 使用 eino 调试插件时，需要在输入框中指定 map[string]any 中 'any' 的具体类型。例如，您可以输入以下数据进行调试：
 //{
 //	"name": {
 //		"_value": "alice",
@@ -82,9 +98,12 @@ func RegisterSimpleGraph(ctx context.Context) {
 //	}
 //}
 
+// RegisterAnyInputGraph 注册一个接受任意输入类型的图
 func RegisterAnyInputGraph(ctx context.Context) {
+	// 创建一个新图，输入为 map[string]any，输出为字符串
 	g := compose.NewGraph[map[string]any, string]()
 
+	// 添加一个 lambda 节点 "node_1"，处理 map[string]any 类型的输入
 	_ = g.AddLambdaNode("node_1", compose.InvokableLambda(func(ctx context.Context, input map[string]any) (output string, err error) {
 		for k, v := range input {
 			switch v.(type) {
@@ -93,34 +112,40 @@ func RegisterAnyInputGraph(ctx context.Context) {
 			case int:
 				output += k + ":" + fmt.Sprintf("%d", v.(int))
 			default:
-				return "", fmt.Errorf("unsupported type: %T", v)
+				return "", fmt.Errorf("不支持的类型: %T", v)
 			}
 		}
 
 		return output, nil
 	}))
 
+	// 添加一个 lambda 节点 "node_2"
 	_ = g.AddLambdaNode("node_2", compose.InvokableLambda(func(ctx context.Context, input string) (output string, err error) {
-		return input + " process by node_2,", nil
+		return input + " 由节点2处理,", nil
 	}))
 
+	// 添加入口到 "node_1" 的边
 	_ = g.AddEdge(compose.START, "node_1")
 
+	// 添加 "node_1" 到 "node_2" 的边
 	_ = g.AddEdge("node_1", "node_2")
 
+	// 添加 "node_2" 到出口的边
 	_ = g.AddEdge("node_2", compose.END)
 
+	// 编译图
 	r, err := g.Compile(ctx)
 	if err != nil {
-		logs.Errorf("compile graph failed, err=%v", err)
+		logs.Errorf("编译图失败, err=%v", err)
 		return
 	}
 
+	// 调用图
 	message, err := r.Invoke(ctx, map[string]any{"name": "bob", "score": 100})
 	if err != nil {
-		logs.Errorf("invoke graph failed, err=%v", err)
+		logs.Errorf("调用图失败, err=%v", err)
 		return
 	}
 
-	logs.Infof("eino any input graph output is: %v", message)
+	logs.Infof("eino 任意输入图的输出是: %v", message)
 }
