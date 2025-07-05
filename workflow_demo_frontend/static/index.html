@@ -4,126 +4,77 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Eino 工作流对话系统</title>
-    <script src="https://cdn.tailwindcss.com"></script>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
-    <style>
-      .chat-message {
-        animation: fadeIn 0.3s ease-in-out;
-      }
-
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-          transform: translateY(10px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-
-      .typing-indicator::after {
-        content: "...";
-        animation: typing 1.5s infinite;
-      }
-
-      @keyframes typing {
-        0% {
-          content: ".";
-        }
-        33% {
-          content: "..";
-        }
-        66% {
-          content: "...";
-        }
-        100% {
-          content: ".";
-        }
-      }
-
-      /* 自定义滚动条 */
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 6px;
-      }
-
-      .custom-scrollbar::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 10px;
-      }
-
-      .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 10px;
-      }
-
-      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: #555;
-      }
-    </style>
+    <link rel="stylesheet" href="style.css" />
   </head>
-  <body class="bg-gray-100 h-screen flex flex-col">
-    <header class="bg-blue-600 text-white p-4 shadow-md">
-      <div class="container mx-auto flex justify-between items-center">
-        <h1 class="text-2xl font-bold">Eino 工作流对话系统</h1>
-        <div class="text-sm">基于 Eino 框架的智能对话系统</div>
+  <body>
+    <!-- 侧边栏 -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <button class="new-chat-button" id="new-chat-btn">
+          <i class="fas fa-plus"></i>
+          <span>新对话</span>
+        </button>
       </div>
-    </header>
+      <div class="sidebar-footer">
+        <div style="font-size: 12px; opacity: 0.7; text-align: center">
+          基于 Eino 框架构建
+        </div>
+      </div>
+    </div>
 
-    <main
-      class="flex-grow container mx-auto p-4 flex flex-col h-full max-w-4xl"
-    >
-      <div class="bg-white rounded-lg shadow-md flex flex-col h-full">
-        <!-- 聊天历史 -->
-        <div
-          id="chat-history"
-          class="flex-grow p-4 overflow-y-auto custom-scrollbar"
-        >
-          <div class="space-y-4">
-            <div class="chat-message flex">
-              <div
-                class="flex-shrink-0 bg-blue-500 h-10 w-10 rounded-full flex items-center justify-center text-white"
-              >
-                <i class="fas fa-robot"></i>
-              </div>
-              <div class="ml-3 bg-blue-100 p-3 rounded-lg max-w-[80%]">
-                <div class="text-sm text-gray-500 mb-1">系统</div>
-                <div class="text-gray-800">
-                  欢迎使用 Eino
-                  工作流对话系统！您可以向我询问关于学生守则或员工规范的问题。
-                </div>
-              </div>
+    <!-- 移动端菜单按钮 -->
+    <button class="mobile-nav" id="mobile-nav">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- 主内容区域 -->
+    <div class="main-content" id="main-content">
+      <div class="chat-container" id="chat-container">
+        <!-- AI 欢迎消息 -->
+        <div class="chat-message ai-message">
+          <div class="message-content">
+            <div class="avatar ai-avatar">
+              <i class="fas fa-robot"></i>
+            </div>
+            <div>
+              欢迎使用 Eino
+              工作流对话系统！您可以向我询问关于学生守则或员工规范的问题。
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 输入区域 -->
-        <div class="border-t p-4">
-          <form id="chat-form" class="flex items-center">
-            <input
-              type="text"
+      <!-- 输入区域 -->
+      <div class="input-container">
+        <div class="input-box">
+          <form id="chat-form" class="input-form">
+            <textarea
               id="user-input"
-              class="flex-grow border rounded-l-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="输入您的问题..."
-              autocomplete="off"
-            />
-            <button
-              type="submit"
-              class="bg-blue-600 text-white px-4 py-2 rounded-r-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-center"
-            >
+              class="input-textarea"
+              placeholder="发送消息..."
+              rows="1"
+            ></textarea>
+            <button type="submit" class="send-button" id="send-button" disabled>
               <i class="fas fa-paper-plane"></i>
             </button>
           </form>
+          <div
+            style="
+              font-size: 12px;
+              color: var(--color-subtext);
+              text-align: center;
+              margin-top: 5px;
+            "
+          >
+            Eino 工作流对话系统 © 2023
+          </div>
         </div>
       </div>
-    </main>
-
-    <footer class="bg-gray-800 text-white p-2 text-center text-sm">
-      <p>© 2023 Eino 工作流对话系统 | 基于 Eino 框架构建</p>
-    </footer>
+    </div>
 
     <script src="script.js"></script>
   </body>
