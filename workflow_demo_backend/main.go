@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/cloudwego/eino-examples/internal/logs"
-	"github.com/cloudwego/eino-examples/workflow_demo/graph"
+	"github.com/cloudwego/eino-examples/workflow_demo_backend/graph"
 	"github.com/cloudwego/eino-ext/devops"
 )
 
