@@ -61,12 +61,12 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 	}), compose.WithStatePostHandler(func(ctx context.Context, out string, state *RewriteState) (string, error) {
 		state.OriginalQuery = out
 		return out, nil
-	}))
+	}), compose.WithNodeName("存储初始查询"))
 
 	// 节点：为分类器提示准备输入
 	_ = sg.AddLambdaNode("prepare_classifier_input", compose.InvokableLambda(func(ctx context.Context, input string) (map[string]any, error) {
 		return map[string]any{"input": input}, nil
-	}))
+	}), compose.WithNodeName("准备分类器输入"))
 
 	// 分类器节点
 	classifierPrompt := prompt.FromMessages(
@@ -74,8 +74,8 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 		schema.SystemMessage("你是一个查询分类器。判断用户的输入是一个有效问题还是无效的垃圾信息/辱骂。请只回答 'valid' 或 'invalid'。"),
 		schema.UserMessage("用户输入: {input}"),
 	)
-	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt)
-	_ = sg.AddChatModelNode("classifier_model", chatModel)
+	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt, compose.WithNodeName("分类器提示词"))
+	_ = sg.AddChatModelNode("classifier_model", chatModel, compose.WithNodeName("分类器模型"))
 
 	// 节点：用分类器的决定更新状态
 	_ = sg.AddLambdaNode("update_state_with_decision", compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) (*schema.Message, error) {
@@ -89,7 +89,7 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 		}
 		fmt.Printf("分类器判定: %s\n", state.Decision)
 		return msg, nil
-	}))
+	}), compose.WithNodeName("更新状态-分类决定"))
 
 	// 节点：为重写器提示准备输入 (有效分支)
 	_ = sg.AddLambdaNode("prepare_rewriter_input", compose.InvokableLambda(func(ctx context.Context, _ *schema.Message) (map[string]any, error) {
@@ -102,7 +102,7 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 			return nil, err
 		}
 		return map[string]any{"input": query}, nil
-	}))
+	}), compose.WithNodeName("准备重写器输入"))
 
 	// 重写器节点 (有效分支)
 	rewriterPrompt := prompt.FromMessages(
@@ -110,11 +110,11 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 		schema.SystemMessage("你是一位专业的查询重写专家。请将用户的问题改写得更清晰、更适合搜索引擎。"),
 		schema.UserMessage("用户问题: {input}"),
 	)
-	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt)
-	_ = sg.AddChatModelNode("rewriter_model", chatModel)
+	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt, compose.WithNodeName("重写器提示词"))
+	_ = sg.AddChatModelNode("rewriter_model", chatModel, compose.WithNodeName("重写器模型"))
 	_ = sg.AddLambdaNode("get_rewritten_output", compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) (string, error) {
 		return msg.Content, nil
-	}))
+	}), compose.WithNodeName("获取重写结果"))
 
 	// 直通节点 (无效分支)
 	_ = sg.AddLambdaNode("passthrough_node", compose.InvokableLambda(func(ctx context.Context, _ *schema.Message) (string, error) {
@@ -124,7 +124,7 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 			return nil
 		})
 		return query, err
-	}))
+	}), compose.WithNodeName("无效问题直通"))
 
 	// 定义图的结构 (边)
 	_ = sg.AddEdge(compose.START, "start_node")
@@ -211,7 +211,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 	}), compose.WithStatePostHandler(func(ctx context.Context, out string, state *RewriteState) (string, error) {
 		state.OriginalQuery = out
 		return out, nil
-	}))
+	}), compose.WithNodeName("存储初始查询(流式)"))
 
 	// 节点：为分类器提示准备输入
 	_ = sg.AddLambdaNode("prepare_classifier_input", compose.StreamableLambda(func(ctx context.Context, input string) (*schema.StreamReader[map[string]any], error) {
@@ -219,7 +219,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		sw.Send(map[string]any{"input": input}, nil)
 		sw.Close()
 		return sr, nil
-	}))
+	}), compose.WithNodeName("准备分类器输入(流式)"))
 
 	// 分类器节点
 	classifierPrompt := prompt.FromMessages(
@@ -227,7 +227,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		schema.SystemMessage("你是一个查询分类器。判断用户的输入是一个有效问题还是无效的垃圾信息/辱骂。请只回答 'valid' 或 'invalid'。"),
 		schema.UserMessage("用户输入: {input}"),
 	)
-	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt)
+	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt, compose.WithNodeName("分类器提示词"))
 	// 因为AI模型只支持流式，使用StreamableLambda。
 	// 这个lambda调用流式端点并聚合结果为单个消息。
 	_ = sg.AddLambdaNode("classifier_model_stream", compose.StreamableLambda(
@@ -262,7 +262,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 			sw.Close()
 			return sr, nil
 		},
-	))
+	), compose.WithNodeName("分类器模型(流式)"))
 
 	// 节点：用分类器的决定更新状态
 	_ = sg.AddLambdaNode("update_state_with_decision", compose.StreamableLambda(func(ctx context.Context, msg *schema.Message) (*schema.StreamReader[*schema.Message], error) {
@@ -279,7 +279,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		}
 		fmt.Printf("分类器判定: %s\n", state.Decision)
 		return msg, nil
-	}))
+	}), compose.WithNodeName("更新状态-分类决定(流式)"))
 
 	// 节点：为重写器提示准备输入 (有效分支)
 	_ = sg.AddLambdaNode("prepare_rewriter_input", compose.StreamableLambda(func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[map[string]any], error) {
@@ -295,7 +295,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		sw.Send(map[string]any{"input": query}, nil)
 		sw.Close()
 		return sr, nil
-	}))
+	}), compose.WithNodeName("准备重写器输入(流式)"))
 
 	// 重写器节点 (有效分支)
 	rewriterPrompt := prompt.FromMessages(
@@ -303,7 +303,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		schema.SystemMessage("你是一位专业的查询重写专家。请将用户的问题改写得更清晰、更适合搜索引擎。"),
 		schema.UserMessage("用户问题: {input}"),
 	)
-	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt)
+	_ = sg.AddChatTemplateNode("rewriter_prompt", rewriterPrompt, compose.WithNodeName("重写器提示词"))
 	_ = sg.AddLambdaNode("rewriter_model_stream", compose.StreamableLambda(
 		func(ctx context.Context, messages []*schema.Message) (*schema.StreamReader[string], error) {
 			stream, err := chatModel.Stream(ctx, messages)
@@ -329,7 +329,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 			}()
 			return sr, nil
 		},
-	))
+	), compose.WithNodeName("重写器模型(流式)"))
 
 	// 直通节点 (无效分支)
 	_ = sg.AddLambdaNode("passthrough_node", compose.StreamableLambda(func(ctx context.Context, _ *schema.Message) (*schema.StreamReader[string], error) {
@@ -345,7 +345,7 @@ func NewConditionalRewriterGraphStream(ctx context.Context) (compose.Runnable[st
 		sw.Send(query, nil)
 		sw.Close()
 		return sr, nil
-	}))
+	}), compose.WithNodeName("无效问题直通(流式)"))
 
 	// 定义图的结构 (边)
 	_ = sg.AddEdge(compose.START, "start_node")
