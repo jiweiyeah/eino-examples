@@ -12,7 +12,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 func main() {
@@ -25,10 +27,48 @@ func main() {
 		return
 	}
 
-	Invokeuse(ctx)
+	constructUse(ctx)
+
+	// 阻塞进程退出
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	<-sigs
+
+	// 退出
+	logs.Infof("[eino dev] 关闭\n")
+}
+func constructUse(ctx context.Context) {
+	reconstructGraph, err := graph.NewReconstructGraph(ctx)
+
+	if err != nil {
+		panic(err)
+	}
+	question := "员工有什么规范"
+	output, err := reconstructGraph.Stream(ctx, question)
+
+	// 处理流式输出
+	var result string
+	for {
+		chunk, err := output.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Panic(err)
+			//return
+		}
+		result += chunk
+		// 直接打印每个字符，不换行
+		fmt.Print(chunk)
+	}
+	fmt.Println(result)
+	//if err != nil {
+	//	panic(err)
+	//}
+
+	log.Println("输出结果是：", result)
 
 }
-
 func Invokeuse(ctx context.Context) {
 
 	rewriterGraph, err := graph.NewConditionalRewriterGraph(ctx)
@@ -87,6 +127,7 @@ func Streamuse(ctx context.Context) {
 		}
 		fmt.Println() // 在每次输出后换行
 	}
+
 }
 
 // init 会在 main 之前执行，设置全局 HTTP 日志拦截
