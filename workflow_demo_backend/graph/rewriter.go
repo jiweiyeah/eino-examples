@@ -26,7 +26,7 @@ type RewriteState struct {
 // NewConditionalRewriterGraph 创建并编译一个条件重写工作流图。
 func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, string], error) {
 	// 加载 .env 文件
-	err := godotenv.Load("../.env")
+	err := godotenv.Load("/Users/apple/code/yeah-eino/eino-examples/.env")
 	if err != nil {
 		// 允许在没有 .env 文件的情况下运行
 	}
@@ -77,7 +77,7 @@ func NewConditionalRewriterGraph(ctx context.Context) (compose.Runnable[string, 
 		schema.UserMessage("用户输入: {input}"),
 	)
 	_ = sg.AddChatTemplateNode("classifier_prompt", classifierPrompt, compose.WithNodeName("分类器提示词"))
-	_ = sg.AddChatModelNode("classifier_model", chatModel, compose.WithNodeName("分类器模型"))
+	_ = sg.AddChatModelNode("classifier_model", chatModel, compose.WithNodeName("分类器model"))
 
 	// 节点：用分类器的决定更新状态
 	_ = sg.AddLambdaNode("update_state_with_decision", compose.InvokableLambda(func(ctx context.Context, msg *schema.Message) (*schema.Message, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/cloudwego/eino-ext/devops"
 	"io"
 	"log"
 	"net/http"
@@ -38,13 +39,12 @@ func main() {
 
 	// 初始化 eino devops 服务
 	// 跳过初始化以避免端口冲突
-	/*
+
 	err := devops.Init(ctx)
 	if err != nil {
 		logs.Errorf("[eino dev] 初始化失败, err=%v", err)
 		return
 	}
-	*/
 
 	// 编译工作流图
 	workflow, err := graph.NewConditionalRewriterGraphStream(ctx)
@@ -58,13 +58,13 @@ func main() {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		
+
 		// 处理预检请求
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		
+
 		// 只接受POST请求
 		if r.Method != "POST" {
 			http.Error(w, "只支持POST方法", http.StatusMethodNotAllowed)
@@ -121,7 +121,7 @@ func main() {
 				logs.Errorf("从流中接收数据时出错, err: %v", err)
 				break
 			}
-			
+
 			// 发送事件
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
 			flusher.Flush()
@@ -181,7 +181,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
-	
+
 	log.Printf("服务器启动在 http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
