@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eino 工作流对话系统</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- 侧边栏 -->
+    <div class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <button class="new-chat-button" id="new-chat-btn">
+          <i class="fas fa-plus"></i>
+          <span>新对话</span>
+        </button>
+      </div>
+      <div class="sidebar-footer">
+        <div style="font-size: 12px; opacity: 0.7; text-align: center">
+          基于 Eino 框架构建
+        </div>
+      </div>
+    </div>
+
+    <!-- 移动端菜单按钮 -->
+    <button class="mobile-nav" id="mobile-nav">
+      <i class="fas fa-bars"></i>
+    </button>
+
+    <!-- 主内容区域 -->
+    <div class="main-content" id="main-content">
+      <div class="chat-container" id="chat-container">
+        <!-- AI 欢迎消息 -->
+        <div class="chat-message ai-message">
+          <div class="message-content">
+            <div class="avatar ai-avatar">
+              <i class="fas fa-robot"></i>
+            </div>
+            <div>
+              欢迎使用 Eino
+              工作流对话系统！您可以向我询问关于学生守则或员工规范的问题。
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入区域 -->
+      <div class="input-container">
+        <div class="input-box">
+          <form id="chat-form" class="input-form">
+            <textarea
+              id="user-input"
+              class="input-textarea"
+              placeholder="发送消息..."
+              rows="1"
+            ></textarea>
+            <button type="submit" class="send-button" id="send-button" disabled>
+              <i class="fas fa-paper-plane"></i>
+            </button>
+          </form>
+          <div
+            style="
+              font-size: 12px;
+              color: var(--color-subtext);
+              text-align: center;
+              margin-top: 5px;
+            "
+          >
+            Eino 工作流对话系统 © 2023
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
