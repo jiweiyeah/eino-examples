@@ -3,16 +3,18 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/cloudwego/eino-examples/internal/logs"
-	"github.com/cloudwego/eino-examples/workflow_demo_frontend/graph"
+	"github.com/cloudwego/eino-examples/websocket_demo_frontend/graph"
+	"github.com/cloudwego/eino/compose"
+	"github.com/gorilla/websocket"
 )
 
 type ChatRequest struct {
@@ -33,6 +35,53 @@ type wsMessage struct {
 	Content string `json:"content"`
 }
 
+// WebSocket消息类型
+type wsCommand struct {
+	Type    string          `json:"type"`    // "chat", "save", "history", "load"
+	Payload json.RawMessage `json:"payload"` // 不同类型的消息有不同的payload
+}
+
+// WebSocket连接管理器
+type wsConnectionManager struct {
+	connections map[*websocket.Conn]bool
+	mutex       sync.Mutex
+}
+
+// 创建新的连接管理器
+func newWSConnectionManager() *wsConnectionManager {
+	return &wsConnectionManager{
+		connections: make(map[*websocket.Conn]bool),
+	}
+}
+
+// 添加连接
+func (m *wsConnectionManager) addConnection(conn *websocket.Conn) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.connections[conn] = true
+	logs.Infof("新的WebSocket连接，当前连接数: %d", len(m.connections))
+}
+
+// 移除连接
+func (m *wsConnectionManager) removeConnection(conn *websocket.Conn) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if _, ok := m.connections[conn]; ok {
+		delete(m.connections, conn)
+		conn.Close()
+		logs.Infof("WebSocket连接关闭，当前连接数: %d", len(m.connections))
+	}
+}
+
+// WebSocket升级器
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+	CheckOrigin: func(r *http.Request) bool {
+		return true // 允许所有来源的WebSocket连接
+	},
+}
+
 func main() {
 	ctx := context.Background()
 
@@ -42,124 +91,76 @@ func main() {
 		log.Fatalf("编译图失败, err: %v", err)
 	}
 
-	// 设置HTTP服务器
-	http.HandleFunc("/api/chat", func(w http.ResponseWriter, r *http.Request) {
-		// 允许跨域请求
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	// 创建WebSocket连接管理器
+	wsManager := newWSConnectionManager()
 
-		// 处理预检请求
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// 只接受POST请求
-		if r.Method != "POST" {
-			http.Error(w, "只支持POST方法", http.StatusMethodNotAllowed)
-			return
-		}
-
-		// 解析请求
-		var req ChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "无效的请求格式", http.StatusBadRequest)
-			return
-		}
-
-		// 检查消息是否为空
-		if req.Message == "" {
-			http.Error(w, "消息不能为空", http.StatusBadRequest)
-			return
-		}
-
-		// 使用工作流处理消息
-		stream, err := workflow.Stream(r.Context(), req.Message)
+	// 设置WebSocket处理器
+	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			logs.Errorf("调用图失败, err: %v", err)
-			http.Error(w, "处理消息时出错", http.StatusInternalServerError)
+			logs.Errorf("WebSocket升级失败: %v", err)
 			return
 		}
 
-		// 设置响应头为Server-Sent Events
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.Header().Set("Cache-Control", "no-cache")
-		w.Header().Set("Connection", "keep-alive")
+		// 添加新连接
+		wsManager.addConnection(conn)
 
-		// 处理流式输出
-		flusher, ok := w.(http.Flusher)
-		if !ok {
-			http.Error(w, "服务器不支持流式输出", http.StatusInternalServerError)
-			return
-		}
+		// 处理连接关闭
+		defer wsManager.removeConnection(conn)
 
-		// 处理客户端断开连接
-		notify := r.Context().Done()
-		go func() {
-			<-notify
-			logs.Infof("客户端断开连接")
-		}()
-
-		// 发送流式响应
+		// 处理WebSocket消息
 		for {
-			chunk, err := stream.Recv()
+			messageType, message, err := conn.ReadMessage()
 			if err != nil {
-				if err == io.EOF {
-					break // 流结束
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					logs.Errorf("WebSocket读取错误: %v", err)
 				}
-				logs.Errorf("从流中接收数据时出错, err: %v", err)
 				break
 			}
 
-			// 发送事件
-			fmt.Fprintf(w, "data: %s\n\n", chunk)
-			flusher.Flush()
+			if messageType != websocket.TextMessage {
+				continue
+			}
+
+			// 解析命令
+			var cmd wsCommand
+			if err := json.Unmarshal(message, &cmd); err != nil {
+				logs.Errorf("解析WebSocket消息失败: %v", err)
+				sendErrorMessage(conn, "无效的消息格式")
+				continue
+			}
+
+			// 根据命令类型处理
+			switch cmd.Type {
+			case "chat":
+				var chatReq ChatRequest
+				if err := json.Unmarshal(cmd.Payload, &chatReq); err != nil {
+					sendErrorMessage(conn, "无效的聊天请求格式")
+					continue
+				}
+				handleChatRequest(r.Context(), conn, workflow, chatReq)
+			case "save":
+				var saveReq SaveChatRequest
+				if err := json.Unmarshal(cmd.Payload, &saveReq); err != nil {
+					sendErrorMessage(conn, "无效的保存请求格式")
+					continue
+				}
+				handleSaveChat(conn, saveReq)
+			case "history":
+				handleGetChatHistory(conn)
+			case "load":
+				var loadReq struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(cmd.Payload, &loadReq); err != nil {
+					sendErrorMessage(conn, "无效的加载请求格式")
+					continue
+				}
+				handleLoadChat(conn, loadReq.ID)
+			default:
+				sendErrorMessage(conn, "未知的命令类型")
+			}
 		}
-	})
-
-	// 新增API：保存聊天记录
-	http.HandleFunc("/api/history", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		switch r.Method {
-		case "POST":
-			saveChatHistory(w, r)
-		case "GET":
-			getChatHistoryList(w, r)
-		default:
-			http.Error(w, "方法不支持", http.StatusMethodNotAllowed)
-		}
-	})
-
-	// 新增API：获取指定聊天记录
-	http.HandleFunc("/api/history/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		if r.Method == "GET" {
-			getChatHistory(w, r)
-		} else {
-			http.Error(w, "方法不支持", http.StatusMethodNotAllowed)
-		}
-	})
-
-	// 添加 /chat/ 路径处理，重定向到根路径
-	http.HandleFunc("/chat/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/", http.StatusMovedPermanently)
 	})
 
 	// 提供静态文件服务
@@ -172,48 +173,110 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("服务器启动在 http://localhost:%s", port)
+	log.Printf("WebSocket服务器启动在 http://localhost:%s", port)
 	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
 
-func saveChatHistory(w http.ResponseWriter, r *http.Request) {
-	var req SaveChatRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "无效的请求格式", http.StatusBadRequest)
+// 发送错误消息
+func sendErrorMessage(conn *websocket.Conn, errMsg string) {
+	response := map[string]interface{}{
+		"type":    "error",
+		"message": errMsg,
+	}
+	if err := conn.WriteJSON(response); err != nil {
+		logs.Errorf("发送错误消息失败: %v", err)
+	}
+}
+
+// 处理聊天请求
+func handleChatRequest(ctx context.Context, conn *websocket.Conn, workflow compose.Runnable[string, string], req ChatRequest) {
+	// 检查消息是否为空
+	if req.Message == "" {
+		sendErrorMessage(conn, "消息不能为空")
 		return
 	}
 
-	if req.ID == "" || len(req.Messages) == 0 {
-		http.Error(w, "ID和消息不能为空", http.StatusBadRequest)
+	// 使用工作流处理消息
+	stream, err := workflow.Stream(ctx, req.Message)
+	if err != nil {
+		logs.Errorf("调用图失败, err: %v", err)
+		sendErrorMessage(conn, "处理消息时出错")
 		return
 	}
+
+	// 发送流式响应
+	for {
+		chunk, err := stream.Recv()
+		if err != nil {
+			if err == io.EOF {
+				break // 流结束
+			}
+			logs.Errorf("从流中接收数据时出错, err: %v", err)
+			break
+		}
+
+		// 发送WebSocket消息
+		response := map[string]interface{}{
+			"type":    "chat_chunk",
+			"content": chunk,
+		}
+		if err := conn.WriteJSON(response); err != nil {
+			logs.Errorf("发送WebSocket消息失败: %v", err)
+			break
+		}
+	}
+
+	// 发送流结束标记
+	endResponse := map[string]interface{}{
+		"type": "chat_end",
+	}
+	if err := conn.WriteJSON(endResponse); err != nil {
+		logs.Errorf("发送WebSocket流结束消息失败: %v", err)
+	}
+}
+
+// 处理保存聊天记录
+func handleSaveChat(conn *websocket.Conn, req SaveChatRequest) {
+	if req.ID == "" || len(req.Messages) == 0 {
+		sendErrorMessage(conn, "ID和消息不能为空")
+		return
+	}
+
+	// 确保目录存在
+	os.MkdirAll("chat_logs", 0755)
 
 	filePath := filepath.Join("chat_logs", req.ID+".json")
 	file, err := os.Create(filePath)
 	if err != nil {
-		http.Error(w, "无法创建聊天记录文件", http.StatusInternalServerError)
+		sendErrorMessage(conn, "无法创建聊天记录文件")
 		return
 	}
 	defer file.Close()
 
 	if err := json.NewEncoder(file).Encode(req.Messages); err != nil {
-		http.Error(w, "无法写入聊天记录", http.StatusInternalServerError)
+		sendErrorMessage(conn, "无法写入聊天记录")
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
+	// 发送成功响应
+	response := map[string]interface{}{
+		"type":    "save_success",
+		"message": "聊天记录保存成功",
+	}
+	if err := conn.WriteJSON(response); err != nil {
+		logs.Errorf("发送保存成功消息失败: %v", err)
+	}
 }
 
-func getChatHistoryList(w http.ResponseWriter, r *http.Request) {
+// 获取聊天历史列表
+func handleGetChatHistory(conn *websocket.Conn) {
+	// 确保目录存在
+	os.MkdirAll("chat_logs", 0755)
+
 	files, err := os.ReadDir("chat_logs")
 	if err != nil {
-		if os.IsNotExist(err) {
-			os.MkdirAll("chat_logs", 0755)
-			files = []os.DirEntry{}
-		} else {
-			http.Error(w, "无法读取聊天记录目录", http.StatusInternalServerError)
-			return
-		}
+		sendErrorMessage(conn, "无法读取聊天记录目录")
+		return
 	}
 
 	history := []map[string]string{}
@@ -234,14 +297,20 @@ func getChatHistoryList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	// 发送历史记录响应
+	response := map[string]interface{}{
+		"type":    "history_list",
+		"history": history,
+	}
+	if err := conn.WriteJSON(response); err != nil {
+		logs.Errorf("发送历史记录列表失败: %v", err)
+	}
 }
 
-func getChatHistory(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/api/history/")
+// 加载指定聊天记录
+func handleLoadChat(conn *websocket.Conn, id string) {
 	if id == "" {
-		http.Error(w, "缺少聊天ID", http.StatusBadRequest)
+		sendErrorMessage(conn, "缺少聊天ID")
 		return
 	}
 
@@ -249,13 +318,27 @@ func getChatHistory(w http.ResponseWriter, r *http.Request) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			http.Error(w, "聊天记录不存在", http.StatusNotFound)
+			sendErrorMessage(conn, "聊天记录不存在")
 		} else {
-			http.Error(w, "无法读取聊天记录文件", http.StatusInternalServerError)
+			sendErrorMessage(conn, "无法读取聊天记录文件")
 		}
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(content)
+	var messages []wsMessage
+	if err := json.Unmarshal(content, &messages); err != nil {
+		sendErrorMessage(conn, "无法解析聊天记录")
+		return
+	}
+
+	// 发送聊天记录响应
+	response := map[string]interface{}{
+		"type":     "chat_history",
+		"id":       id,
+		"messages": messages,
+	}
+	if err := conn.WriteJSON(response); err != nil {
+		logs.Errorf("发送聊天记录失败: %v", err)
+	}
 }
+

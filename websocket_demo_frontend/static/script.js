@@ -7,6 +7,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const mobileNavBtn = document.getElementById("mobile-nav");
   const sidebar = document.getElementById("sidebar");
   const mainContent = document.getElementById("main-content");
+  const connectWsBtn = document.getElementById("connect-ws-btn");
+  const disconnectWsBtn = document.getElementById("disconnect-ws-btn");
+  const connectionStatus = document.getElementById("connection-status");
   const historyList = document.createElement("div");
   historyList.className = "history-list";
   sidebar.insertBefore(historyList, sidebar.querySelector(".sidebar-footer"));
@@ -14,6 +17,9 @@ document.addEventListener("DOMContentLoaded", () => {
   // 存储聊天历史
   let chatMessages = [];
   let currentChatId = null;
+  let socket = null;
+  let isConnected = false;
+  let currentAiResponseElement = null;
 
   // 处理侧边栏切换
   mobileNavBtn.addEventListener("click", () => {
@@ -33,10 +39,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // 连接WebSocket按钮
+  connectWsBtn.addEventListener("click", connectWebSocket);
+
+  // 断开WebSocket按钮
+  disconnectWsBtn.addEventListener("click", disconnectWebSocket);
+
   // 动态调整文本域高度
   userInput.addEventListener("input", () => {
     // 启用/禁用发送按钮
-    sendButton.disabled = userInput.value.trim() === "";
+    sendButton.disabled = userInput.value.trim() === "" || !isConnected;
 
     // 调整高度
     userInput.style.height = "24px";
@@ -48,7 +60,7 @@ document.addEventListener("DOMContentLoaded", () => {
     e.preventDefault();
 
     const message = userInput.value.trim();
-    if (!message) return;
+    if (!message || !isConnected) return;
 
     // 清空输入框并重置高度
     userInput.value = "";
@@ -63,8 +75,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const typingIndicator = addTypingIndicator();
 
     try {
-      // 发送消息到API
-      await sendMessage(message, typingIndicator);
+      // 发送消息到WebSocket
+      sendChatMessage(message, typingIndicator);
     } catch (error) {
       console.error("发送消息时出错:", error);
       // 移除输入指示器
@@ -162,31 +174,121 @@ document.addEventListener("DOMContentLoaded", () => {
     return indicatorElement;
   }
 
-  // 发送消息到API并处理流式响应
-  async function sendMessage(message, typingIndicator) {
+  // 连接WebSocket
+  function connectWebSocket() {
+    if (socket !== null) {
+      return; // 已经连接
+    }
+
+    // 获取当前主机
+    const host = window.location.host;
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${host}/ws`;
+
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ message }),
-      });
+      connectionStatus.textContent = "正在连接...";
+      socket = new WebSocket(wsUrl);
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      // 连接打开事件
+      socket.onopen = () => {
+        isConnected = true;
+        connectionStatus.textContent = "已连接";
+        connectionStatus.classList.add("connected");
+        connectWsBtn.disabled = true;
+        disconnectWsBtn.disabled = false;
+        userInput.disabled = false;
+        sendButton.disabled = userInput.value.trim() === "";
+        addSystemMessage("WebSocket连接已建立。您现在可以开始聊天了。");
 
-      // 处理流式响应
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let aiResponse = "";
+        // 连接后加载历史记录
+        requestChatHistory();
+      };
 
-      // 移除输入指示器
-      if (typingIndicator) {
-        typingIndicator.remove();
-      }
+      // 接收消息事件
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        handleWebSocketMessage(data);
+      };
 
+      // 连接关闭事件
+      socket.onclose = () => {
+        handleDisconnect();
+      };
+
+      // 连接错误事件
+      socket.onerror = (error) => {
+        console.error("WebSocket错误:", error);
+        connectionStatus.textContent = "连接错误";
+        connectionStatus.classList.remove("connected");
+        connectionStatus.classList.add("error");
+        addSystemMessage("WebSocket连接出错。请尝试重新连接。");
+        handleDisconnect();
+      };
+    } catch (error) {
+      console.error("创建WebSocket连接时出错:", error);
+      connectionStatus.textContent = "连接失败";
+      connectionStatus.classList.add("error");
+      addSystemMessage("无法创建WebSocket连接。请稍后再试。");
+    }
+  }
+
+  // 断开WebSocket连接
+  function disconnectWebSocket() {
+    if (socket === null) {
+      return; // 已经断开连接
+    }
+
+    try {
+      socket.close();
+    } catch (error) {
+      console.error("关闭WebSocket连接时出错:", error);
+    }
+
+    handleDisconnect();
+    addSystemMessage("WebSocket连接已断开。");
+  }
+
+  // 处理断开连接
+  function handleDisconnect() {
+    isConnected = false;
+    socket = null;
+    connectionStatus.textContent = "未连接";
+    connectionStatus.classList.remove("connected", "error");
+    connectWsBtn.disabled = false;
+    disconnectWsBtn.disabled = true;
+    userInput.disabled = true;
+    sendButton.disabled = true;
+  }
+
+  // 处理WebSocket消息
+  function handleWebSocketMessage(data) {
+    switch (data.type) {
+      case "chat_chunk":
+        handleChatChunk(data.content);
+        break;
+      case "chat_end":
+        finalizeChatResponse();
+        break;
+      case "error":
+        addSystemMessage(`错误: ${data.message}`);
+        break;
+      case "history_list":
+        displayHistoryList(data.history);
+        break;
+      case "chat_history":
+        loadChatData(data.id, data.messages);
+        break;
+      case "save_success":
+        console.log("聊天记录保存成功");
+        break;
+      default:
+        console.warn("收到未知类型的WebSocket消息:", data);
+    }
+  }
+
+  // 处理聊天块
+  function handleChatChunk(content) {
+    if (!currentAiResponseElement) {
       // 创建新的AI消息元素
       const messageElement = document.createElement("div");
       messageElement.className = "chat-message ai-message";
@@ -200,39 +302,167 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
 
       chatContainer.appendChild(messageElement);
-
-      const aiResponseElement = messageElement.querySelector(".ai-response");
-
-      // 读取流式响应
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        // 解码数据
-        const chunk = decoder.decode(value, { stream: true });
-
-        // 处理SSE格式的数据
-        const lines = chunk.split("\n\n");
-        for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.substring(6);
-            aiResponse += data;
-            aiResponseElement.innerHTML = formatMessage(aiResponse);
-            scrollToBottom();
-          }
-        }
-      }
-
-      // 保存消息到历史记录
-      chatMessages.push({ role: "assistant", content: aiResponse });
-      await saveChat();
-    } catch (error) {
-      console.error("处理响应时出错:", error);
-      throw error;
+      currentAiResponseElement = {
+        element: messageElement,
+        responseDiv: messageElement.querySelector(".ai-response"),
+        content: "",
+      };
     }
+
+    // 更新内容
+    currentAiResponseElement.content += content;
+    currentAiResponseElement.responseDiv.innerHTML = formatMessage(
+      currentAiResponseElement.content
+    );
+    scrollToBottom();
+  }
+
+  // 完成聊天响应
+  function finalizeChatResponse() {
+    if (currentAiResponseElement) {
+      // 保存消息到历史记录
+      chatMessages.push({
+        role: "assistant",
+        content: currentAiResponseElement.content,
+      });
+      currentAiResponseElement = null;
+      saveChat();
+    }
+  }
+
+  // 发送聊天消息
+  function sendChatMessage(message, typingIndicator) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      if (typingIndicator) {
+        typingIndicator.remove();
+      }
+      addSystemMessage("WebSocket未连接，无法发送消息。");
+      return;
+    }
+
+    // 移除输入指示器
+    if (typingIndicator) {
+      typingIndicator.remove();
+    }
+
+    const chatCommand = {
+      type: "chat",
+      payload: {
+        message: message,
+      },
+    };
+
+    socket.send(JSON.stringify(chatCommand));
+  }
+
+  // 请求聊天历史列表
+  function requestChatHistory() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const historyCommand = {
+      type: "history",
+    };
+
+    socket.send(JSON.stringify(historyCommand));
+  }
+
+  // 显示历史记录列表
+  function displayHistoryList(history) {
+    historyList.innerHTML = "";
+    history.forEach((item) => addHistoryItem(item));
+  }
+
+  // 添加历史记录项
+  function addHistoryItem(item, isActive = false) {
+    const historyItem = document.createElement("div");
+    historyItem.className = "history-item";
+    historyItem.textContent = item.title;
+    historyItem.dataset.id = item.id;
+
+    if (isActive) {
+      historyItem.classList.add("active");
+    }
+
+    historyItem.addEventListener("click", () => {
+      loadChat(item.id);
+    });
+
+    historyList.prepend(historyItem);
+    if (isActive) {
+      const activeItem = historyList.querySelector(".history-item.active");
+      if (activeItem) {
+        activeItem.classList.remove("active");
+      }
+      historyItem.classList.add("active");
+    }
+  }
+
+  // 加载聊天记录
+  function loadChat(id) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      addSystemMessage("WebSocket未连接，无法加载聊天记录。");
+      return;
+    }
+
+    const loadCommand = {
+      type: "load",
+      payload: {
+        id: id,
+      },
+    };
+
+    socket.send(JSON.stringify(loadCommand));
+  }
+
+  // 加载聊天数据
+  function loadChatData(id, messages) {
+    clearChat();
+    chatMessages = messages;
+    currentChatId = id;
+
+    messages.forEach((msg) => {
+      if (msg.role === "user") {
+        addUserMessage(msg.content);
+      } else {
+        addAIMessage(msg.content);
+      }
+    });
+
+    // 设置当前激活的历史记录项
+    const activeItem = historyList.querySelector(".history-item.active");
+    if (activeItem) {
+      activeItem.classList.remove("active");
+    }
+    const newItem = historyList.querySelector(`[data-id="${id}"]`);
+    if (newItem) {
+      newItem.classList.add("active");
+    }
+  }
+
+  // 保存聊天记录
+  function saveChat() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      console.error("WebSocket未连接，无法保存聊天记录。");
+      return;
+    }
+
+    if (currentChatId === null) {
+      currentChatId = Date.now().toString();
+      const title = chatMessages[0].content.substring(0, 30);
+      addHistoryItem({ id: currentChatId, title: title }, true);
+    }
+
+    const saveCommand = {
+      type: "save",
+      payload: {
+        id: currentChatId,
+        messages: chatMessages,
+      },
+    };
+
+    socket.send(JSON.stringify(saveCommand));
   }
 
   // 滚动聊天历史到底部
@@ -299,96 +529,4 @@ document.addEventListener("DOMContentLoaded", () => {
       mobileNavBtn.classList.remove("scrolled");
     }
   });
-
-  async function saveChat() {
-    if (currentChatId === null) {
-      currentChatId = Date.now().toString();
-      const title = chatMessages[0].content.substring(0, 30);
-      addHistoryItem({ id: currentChatId, title: title }, true);
-    }
-
-    try {
-      await fetch("/api/history", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: currentChatId,
-          messages: chatMessages,
-        }),
-      });
-    } catch (error) {
-      console.error("保存聊天记录失败:", error);
-    }
-  }
-
-  async function loadHistory() {
-    try {
-      const response = await fetch("/api/history");
-      const history = await response.json();
-      historyList.innerHTML = "";
-      history.forEach((item) => addHistoryItem(item));
-    } catch (error) {
-      console.error("加载历史记录失败:", error);
-    }
-  }
-
-  function addHistoryItem(item, isActive = false) {
-    const historyItem = document.createElement("div");
-    historyItem.className = "history-item";
-    historyItem.textContent = item.title;
-    historyItem.dataset.id = item.id;
-
-    if (isActive) {
-      historyItem.classList.add("active");
-    }
-
-    historyItem.addEventListener("click", () => {
-      loadChat(item.id);
-    });
-
-    historyList.prepend(historyItem);
-    if (isActive) {
-      const activeItem = historyList.querySelector(".history-item.active");
-      if (activeItem) {
-        activeItem.classList.remove("active");
-      }
-      historyItem.classList.add("active");
-    }
-  }
-
-  async function loadChat(id) {
-    try {
-      const response = await fetch(`/api/history/${id}`);
-      const messages = await response.json();
-
-      clearChat();
-      chatMessages = messages;
-      currentChatId = id;
-
-      messages.forEach((msg) => {
-        if (msg.role === "user") {
-          addUserMessage(msg.content);
-        } else {
-          addAIMessage(msg.content);
-        }
-      });
-
-      // 设置当前激活的历史记录项
-      const activeItem = historyList.querySelector(".history-item.active");
-      if (activeItem) {
-        activeItem.classList.remove("active");
-      }
-      const newItem = historyList.querySelector(`[data-id="${id}"]`);
-      if (newItem) {
-        newItem.classList.add("active");
-      }
-    } catch (error) {
-      console.error("加载聊天记录失败:", error);
-    }
-  }
-
-  // 初始加载
-  loadHistory();
 });

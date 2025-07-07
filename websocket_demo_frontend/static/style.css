@@ -94,6 +94,68 @@ body {
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* WebSocket控制按钮样式 */
+.websocket-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.ws-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  border: none;
+  color: white;
+  transition: background-color 0.2s;
+}
+
+.ws-button.connect {
+  background-color: #10a37f;
+}
+
+.ws-button.connect:hover {
+  background-color: #0d8c6e;
+}
+
+.ws-button.disconnect {
+  background-color: #e53e3e;
+}
+
+.ws-button.disconnect:hover {
+  background-color: #c53030;
+}
+
+.ws-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.connection-status {
+  text-align: center;
+  font-size: 12px;
+  padding: 4px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #d1d5db;
+}
+
+.connection-status.connected {
+  background-color: rgba(16, 163, 127, 0.2);
+  color: #10a37f;
+}
+
+.connection-status.error {
+  background-color: rgba(229, 62, 62, 0.2);
+  color: #e53e3e;
+}
+
 .sidebar-toggle {
   background: none;
   border: none;

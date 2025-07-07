@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Eino 工作流对话系统</title>
+    <title>Eino WebSocket对话系统</title>
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
@@ -20,7 +20,25 @@
         </button>
       </div>
       <div class="sidebar-footer">
-        <div style="font-size: 12px; opacity: 0.7; text-align: center">
+        <div class="websocket-controls">
+          <button class="ws-button connect" id="connect-ws-btn">
+            <i class="fas fa-plug"></i>
+            <span>连接WebSocket</span>
+          </button>
+          <button class="ws-button disconnect" id="disconnect-ws-btn" disabled>
+            <i class="fas fa-times"></i>
+            <span>断开连接</span>
+          </button>
+          <div class="connection-status" id="connection-status">未连接</div>
+        </div>
+        <div
+          style="
+            font-size: 12px;
+            opacity: 0.7;
+            text-align: center;
+            margin-top: 10px;
+          "
+        >
           基于 Eino 框架构建
         </div>
       </div>
@@ -42,7 +60,7 @@
             </div>
             <div>
               欢迎使用 Eino
-              工作流对话系统！您可以向我询问关于学生守则或员工规范的问题。
+              WebSocket对话系统！请先点击左侧"连接WebSocket"按钮建立连接，然后您可以向我询问关于学生守则或员工规范的问题。
             </div>
           </div>
         </div>
@@ -57,6 +75,7 @@
               class="input-textarea"
               placeholder="发送消息..."
               rows="1"
+              disabled
             ></textarea>
             <button type="submit" class="send-button" id="send-button" disabled>
               <i class="fas fa-paper-plane"></i>
@@ -70,7 +89,7 @@
               margin-top: 5px;
             "
           >
-            Eino 工作流对话系统 © 2023
+            Eino WebSocket对话系统 © 2025
           </div>
         </div>
       </div>
