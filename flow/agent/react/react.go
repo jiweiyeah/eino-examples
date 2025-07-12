@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino/callbacks"
@@ -37,13 +36,13 @@ import (
 )
 
 func main() {
-	arkAPIKey := os.Getenv("ARK_API_KEY")
-	arkModelName := os.Getenv("ARK_MODEL_NAME")
+	// arkAPIKey := os.Getenv("ARK_API_KEY")
+	// arkModelName := os.Getenv("ARK_MODEL_NAME")
 
 	ctx := context.Background()
 	arkModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
-		APIKey: arkAPIKey,
-		Model:  arkModelName,
+		APIKey: "f3772123-e155-498e-baf8-1eac959ae392",
+		Model:  "deepseek-v3-250324",
 	})
 	if err != nil {
 		logs.Errorf("failed to create chat model: %v", err)
