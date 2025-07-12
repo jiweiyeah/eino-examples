@@ -22,21 +22,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
+	"time"
 
-	// "github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino-ext/components/model/openai"
-	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/cloudwego/eino-examples/flow/agent/react/tools"
+	mcpclient "github.com/cloudwego/eino-examples/flow/agent/react/mcp"
 	"github.com/cloudwego/eino-examples/internal/logs"
+	"github.com/cloudwego/eino/callbacks"
 )
 
 func main() {
+	// a simple mcp server for demo
+	// you can run the server from mcp_demo/examples/mcp.go
+	startMCPServer()
+	time.Sleep(1 * time.Second)
 
 	ctx := context.Background()
 	// arkModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
@@ -54,18 +62,23 @@ func main() {
 	}
 
 	// prepare tools
-	restaurantTool := tools.GetRestaurantTool() // 查询餐厅信息的工具
-	dishTool := tools.GetDishTool()             // 查询餐厅菜品信息的工具
+	allTools := []tool.BaseTool{}
+
+	// get mcp tools
+	mcpTools, err := mcpclient.GetMCPTools(ctx, mcpclient.DefaultMCPServerURL)
+	if err != nil {
+		logs.Infof("failed to get mcp tools: %v", err)
+	} else {
+		allTools = append(allTools, mcpTools...)
+	}
 
 	// prepare persona (system prompt) (optional)
-	persona := `# Character:
-你是一个帮助用户推荐餐厅和菜品的助手，根据用户的需要，查询餐厅信息并推荐，查询餐厅的菜品并推荐。
-`
+	persona := `You are a helpful assistant.`
 
 	// replace tool call checker with a custom one: check all trunks until you get a tool call
 	// because some models(claude or doubao 1.5-pro 32k) do not return tool call in the first response
 	// uncomment the following code to enable it
-	/*toolCallChecker := func(ctx context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error) {
+	toolCallChecker := func(ctx context.Context, sr *schema.StreamReader[*schema.Message]) (bool, error) {
 		defer sr.Close()
 		for {
 			msg, err := sr.Recv()
@@ -83,18 +96,23 @@ func main() {
 			}
 		}
 		return false, nil
-	}*/
+	}
+
+	logger, err := NewLoggerCallback("react-agent.log")
+	if err != nil {
+		logs.Fatalf("failed to create logger callback: %v", err)
+	}
+	defer logger.Close()
 
 	ragent, err := react.NewAgent(ctx, &react.AgentConfig{
-		ToolCallingModel: arkModel,
+		Model: arkModel,
 		ToolsConfig: compose.ToolsNodeConfig{
-			Tools: []tool.BaseTool{restaurantTool, dishTool},
+			Tools: allTools,
 		},
-		// StreamToolCallChecker: toolCallChecker, // uncomment it to replace the default tool call checker with custom one
+		StreamToolCallChecker: toolCallChecker, // uncomment it to replace the default tool call checker with custom one
 	})
 	if err != nil {
-		logs.Errorf("failed to create agent: %v", err)
-		return
+		logs.Fatalf("failed to create agent, err: %v", err)
 	}
 
 	// if you want ping/pong, use Generate
@@ -110,6 +128,7 @@ func main() {
 	// }
 	// fmt.Println(msg.String())
 
+	// run agent
 	sr, err := ragent.Stream(ctx, []*schema.Message{
 		{
 			Role:    schema.System,
@@ -117,9 +136,9 @@ func main() {
 		},
 		{
 			Role:    schema.User,
-			Content: "我在北京，给我推荐一些菜，需要有口味辣一点的菜，至少推荐有 2 家餐厅",
+			Content: "what is 123 + 456?",
 		},
-	}, agent.WithComposeOptions(compose.WithCallbacks(&LoggerCallback{})))
+	}, agent.WithComposeOptions(compose.WithCallbacks(logger)))
 	if err != nil {
 		logs.Errorf("failed to stream: %v", err)
 		return
@@ -142,35 +161,120 @@ func main() {
 		}
 
 		// 打字机打印
-		logs.Tokenf("%v", msg.Content)
+		fmt.Print(msg.Content)
 	}
 
 	logs.Infof("\n\n===== finished =====\n")
 
 }
 
+func startMCPServer() {
+	svr := server.NewMCPServer("demo", mcp.LATEST_PROTOCOL_VERSION)
+	svr.AddTool(mcp.NewTool("calculate",
+		mcp.WithDescription("Perform basic arithmetic operations"),
+		mcp.WithString("operation",
+			mcp.Required(),
+			mcp.Description("The operation to perform (add, subtract, multiply, divide)"),
+			mcp.Enum("add", "subtract", "multiply", "divide"),
+		),
+		mcp.WithNumber("x",
+			mcp.Required(),
+			mcp.Description("First number"),
+		),
+		mcp.WithNumber("y",
+			mcp.Required(),
+			mcp.Description("Second number"),
+		),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		arg := request.Params.Arguments.(map[string]any)
+		op := arg["operation"].(string)
+		x := arg["x"].(float64)
+		y := arg["y"].(float64)
+
+		var result float64
+		switch op {
+		case "add":
+			result = x + y
+		case "subtract":
+			result = x - y
+		case "multiply":
+			result = x * y
+		case "divide":
+			if y == 0 {
+				return mcp.NewToolResultText("Cannot divide by zero"), nil
+			}
+			result = x / y
+		}
+		log.Printf("Calculated result: %.2f", result)
+		return mcp.NewToolResultText(fmt.Sprintf("%.2f", result)), nil
+	})
+	go func() {
+		defer func() {
+			e := recover()
+			if e != nil {
+				fmt.Println(e)
+			}
+		}()
+		log.Println("--- Server Side ---")
+		log.Println("Starting MCP SSE server at localhost:12345")
+		err := server.NewSSEServer(svr, server.WithBaseURL("http://localhost:12345")).Start("localhost:12345")
+
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+}
+
 type LoggerCallback struct {
 	callbacks.HandlerBuilder // 可以用 callbacks.HandlerBuilder 来辅助实现 callback
+	file                     *os.File
+}
+
+func NewLoggerCallback(filename string) (*LoggerCallback, error) {
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0666)
+	if err != nil {
+		return nil, err
+	}
+	return &LoggerCallback{file: f}, nil
+}
+
+func (cb *LoggerCallback) Close() {
+	cb.file.Close()
 }
 
 func (cb *LoggerCallback) OnStart(ctx context.Context, info *callbacks.RunInfo, input callbacks.CallbackInput) context.Context {
-	fmt.Println("==================")
+	fmt.Fprintf(cb.file, "==================\n")
 	inputStr, _ := json.MarshalIndent(input, "", "  ") // nolint: byted_s_returned_err_check
-	fmt.Printf("[OnStart] %s\n", string(inputStr))
+	fmt.Fprintf(cb.file, "[OnStart] %s\n", string(inputStr))
 	return ctx
 }
 
 func (cb *LoggerCallback) OnEnd(ctx context.Context, info *callbacks.RunInfo, output callbacks.CallbackOutput) context.Context {
-	fmt.Println("=========[OnEnd]=========")
+	fmt.Fprintf(cb.file, "=========[OnEnd]=========\n")
 	outputStr, _ := json.MarshalIndent(output, "", "  ") // nolint: byted_s_returned_err_check
-	fmt.Println(string(outputStr))
+	fmt.Fprintf(cb.file, "%s\n", string(outputStr))
 	return ctx
 }
 
 func (cb *LoggerCallback) OnError(ctx context.Context, info *callbacks.RunInfo, err error) context.Context {
-	fmt.Println("=========[OnError]=========")
-	fmt.Println(err)
+	fmt.Fprintf(cb.file, "=========[OnError]=========\n")
+	fmt.Fprintf(cb.file, "%v\n", err)
 	return ctx
+}
+
+func (cb *LoggerCallback) OnToolStart(ctx context.Context, input string) {
+	fmt.Fprintf(cb.file, "=========[OnToolStart]=========\n")
+	fmt.Fprintf(cb.file, "Input: %s\n", input)
+}
+
+func (cb *LoggerCallback) OnToolEnd(ctx context.Context, output string) {
+	fmt.Fprintf(cb.file, "=========[OnToolEnd]=========\n")
+	fmt.Fprintf(cb.file, "Output: %s\n", output)
+}
+
+func (cb *LoggerCallback) OnToolError(ctx context.Context, err error) {
+	fmt.Fprintf(cb.file, "=========[OnToolError]=========\n")
+	fmt.Fprintf(cb.file, "Error: %v\n", err)
 }
 
 func (cb *LoggerCallback) OnEndWithStreamOutput(ctx context.Context, info *callbacks.RunInfo,
@@ -187,7 +291,7 @@ func (cb *LoggerCallback) OnEndWithStreamOutput(ctx context.Context, info *callb
 
 		defer output.Close() // remember to close the stream in defer
 
-		fmt.Println("=========[OnEndStream]=========")
+		fmt.Fprintf(cb.file, "=========[OnEndStream]=========\n")
 		for {
 			frame, err := output.Recv()
 			if errors.Is(err, io.EOF) {
@@ -195,18 +299,18 @@ func (cb *LoggerCallback) OnEndWithStreamOutput(ctx context.Context, info *callb
 				break
 			}
 			if err != nil {
-				fmt.Printf("internal error: %s\n", err)
+				fmt.Fprintf(cb.file, "internal error: %s\n", err)
 				return
 			}
 
 			s, err := json.Marshal(frame)
 			if err != nil {
-				fmt.Printf("internal error: %s\n", err)
+				fmt.Fprintf(cb.file, "internal error: %s\n", err)
 				return
 			}
 
 			if info.Name == graphInfoName { // 仅打印 graph 的输出, 否则每个 stream 节点的输出都会打印一遍
-				fmt.Printf("%s: %s\n", info.Name, string(s))
+				fmt.Fprintf(cb.file, "%s: %s\n", info.Name, string(s))
 			}
 		}
 
@@ -219,3 +323,4 @@ func (cb *LoggerCallback) OnStartWithStreamInput(ctx context.Context, info *call
 	defer input.Close()
 	return ctx
 }
+

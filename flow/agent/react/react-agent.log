@@ -1,0 +1,133 @@
+==================
+[OnStart] {
+  "Messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "what is 123 - 456?"
+    }
+  ],
+  "Tools": [
+    {
+      "Name": "calculate",
+      "Desc": "Perform basic arithmetic operations"
+    }
+  ],
+  "ToolChoice": null,
+  "Config": {
+    "Model": "Qwen/Qwen3-8B",
+    "MaxTokens": 0,
+    "Temperature": 0,
+    "TopP": 0,
+    "Stop": null
+  },
+  "Extra": null
+}
+=========[OnEndStream]=========
+==================
+[OnStart] {
+  "role": "assistant",
+  "content": "\n\n",
+  "tool_calls": [
+    {
+      "index": 0,
+      "id": "0197fdeb5bdea4655de61b7b214aee99",
+      "type": "function",
+      "function": {
+        "name": "calculate",
+        "arguments": " {\"operation\": \"subtract\", \"x\": 123, \"y\": 456}"
+      }
+    }
+  ],
+  "response_meta": {
+    "finish_reason": "tool_calls",
+    "usage": {
+      "prompt_tokens": 235,
+      "completion_tokens": 277,
+      "total_tokens": 512
+    }
+  },
+  "extra": {
+    "reasoning-content": "\nOkay, let's see. The user is asking \"what is 123 - 456?\" So I need to perform the subtraction operation here. The numbers are 123 and 456. Let me check the available tools. There's a calculate function that can subtract. The parameters required are operation, x, and y. The operation should be \"subtract\", and the two numbers are x and y. Wait, but in the question, 123 is being subtracted by 456. So which one is x and which is y? The function's parameters are x and y, but the order matters. If the operation is subtract, it's x minus y. So the user wrote 123 - 456, which would be x=123 and y=456. But I should make sure that the function is called correctly. Let me confirm: the function's description says \"Perform basic arithmetic operations\" with subtract as an option. So the correct way is to pass operation as \"subtract\", x as 123, and y as 456. That should give the right result. Alright, I'll structure the tool call accordingly.\n"
+  }
+}
+==================
+[OnStart] " {\"operation\": \"subtract\", \"x\": 123, \"y\": 456}"
+=========[OnEnd]=========
+"{\"content\":[{\"type\":\"text\",\"text\":\"-333.00\"}]}"
+=========[OnEndStream]=========
+==================
+[OnStart] {
+  "Messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant."
+    },
+    {
+      "role": "user",
+      "content": "what is 123 - 456?"
+    },
+    {
+      "role": "assistant",
+      "content": "\n\n",
+      "tool_calls": [
+        {
+          "index": 0,
+          "id": "0197fdeb5bdea4655de61b7b214aee99",
+          "type": "function",
+          "function": {
+            "name": "calculate",
+            "arguments": " {\"operation\": \"subtract\", \"x\": 123, \"y\": 456}"
+          }
+        }
+      ],
+      "response_meta": {
+        "finish_reason": "tool_calls",
+        "usage": {
+          "prompt_tokens": 235,
+          "completion_tokens": 277,
+          "total_tokens": 512
+        }
+      },
+      "extra": {
+        "reasoning-content": "\nOkay, let's see. The user is asking \"what is 123 - 456?\" So I need to perform the subtraction operation here. The numbers are 123 and 456. Let me check the available tools. There's a calculate function that can subtract. The parameters required are operation, x, and y. The operation should be \"subtract\", and the two numbers are x and y. Wait, but in the question, 123 is being subtracted by 456. So which one is x and which is y? The function's parameters are x and y, but the order matters. If the operation is subtract, it's x minus y. So the user wrote 123 - 456, which would be x=123 and y=456. But I should make sure that the function is called correctly. Let me confirm: the function's description says \"Perform basic arithmetic operations\" with subtract as an option. So the correct way is to pass operation as \"subtract\", x as 123, and y as 456. That should give the right result. Alright, I'll structure the tool call accordingly.\n"
+      }
+    },
+    {
+      "role": "tool",
+      "content": "{\"content\":[{\"type\":\"text\",\"text\":\"-333.00\"}]}",
+      "tool_call_id": "0197fdeb5bdea4655de61b7b214aee99",
+      "tool_name": "calculate"
+    }
+  ],
+  "Tools": [
+    {
+      "Name": "calculate",
+      "Desc": "Perform basic arithmetic operations"
+    }
+  ],
+  "ToolChoice": null,
+  "Config": {
+    "Model": "Qwen/Qwen3-8B",
+    "MaxTokens": 0,
+    "Temperature": 0,
+    "TopP": 0,
+    "Stop": null
+  },
+  "Extra": null
+}
+=========[OnEndStream]=========
+=========[OnEndStream]=========
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":1,"total_tokens":302}},"extra":{"reasoning-content":"\n"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":2,"total_tokens":303}},"extra":{"reasoning-content":"Okay"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":3,"total_tokens":304}},"extra":{"reasoning-content":","}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":4,"total_tokens":305}},"extra":{"reasoning-content":" the"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":5,"total_tokens":306}},"extra":{"reasoning-content":" user"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":6,"total_tokens":307}},"extra":{"reasoning-content":" asked"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":7,"total_tokens":308}},"extra":{"reasoning-content":" \""}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":8,"total_tokens":309}},"extra":{"reasoning-content":"what"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":9,"total_tokens":310}},"extra":{"reasoning-content":" is"}}
+ReActAgent: {"role":"assistant","content":"","response_meta":{"usage":{"prompt_tokens":301,"completion_tokens":10,"total_tokens":311}},"extra":{"reasoning-content":" "}}
