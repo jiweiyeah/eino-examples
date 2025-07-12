@@ -23,7 +23,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cloudwego/eino-ext/components/model/ark"
+	// "github.com/cloudwego/eino-ext/components/model/ark"
+	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
@@ -36,13 +37,16 @@ import (
 )
 
 func main() {
-	// arkAPIKey := os.Getenv("ARK_API_KEY")
-	// arkModelName := os.Getenv("ARK_MODEL_NAME")
 
 	ctx := context.Background()
-	arkModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
-		APIKey: "f3772123-e155-498e-baf8-1eac959ae392",
-		Model:  "deepseek-v3-250324",
+	// arkModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
+	// 	APIKey: "f3772123-e155-498e-baf8-1eac959ae392",
+	// 	Model:  "deepseek-v3-250324",
+	// })
+	arkModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		APIKey: "sk-rhlzvcpnvpbrlsvsggqbjwyosibwvqwxbotgfrbtzkeybfdr",
+		Model:  "Qwen/Qwen3-8B",
+		BaseURL: "https://api.siliconflow.cn/v1",
 	})
 	if err != nil {
 		logs.Errorf("failed to create chat model: %v", err)
