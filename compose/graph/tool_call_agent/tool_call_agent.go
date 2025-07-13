@@ -18,8 +18,6 @@ package main
 
 import (
 	"context"
-	"os"
-
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/components/prompt"
@@ -27,6 +25,7 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"log"
 
 	"github.com/cloudwego/eino-examples/internal/gptr"
 	"github.com/cloudwego/eino-examples/internal/logs"
@@ -34,9 +33,17 @@ import (
 
 func main() {
 
-	openAIBaseURL := os.Getenv("OPENAI_BASE_URL")
-	openAIAPIKey := os.Getenv("OPENAI_API_KEY")
-	modelName := os.Getenv("OPENAI_MODEL_NAME")
+	OPENAI_BASE_URL := "https://api.siliconflow.cn/v1"
+	OPENAI_API_KEY := "sk-rhlzvcpnvpbrlsvsggqbjwyosibwvqwxbotgfrbtzkeybfdr"
+	OPENAI_MODEL_NAME := "deepseek-ai/DeepSeek-V3"
+
+	openAIBaseURL := OPENAI_BASE_URL
+	openAIAPIKey := OPENAI_API_KEY
+	modelName := OPENAI_MODEL_NAME
+
+	log.Printf("OPENAI_BASE_URL: %s\n", openAIBaseURL)
+	log.Printf("OPENAI_API_KEY: %s\n", openAIAPIKey)
+	log.Printf("OPENAI_MODEL_NAME: %s\n", modelName)
 
 	ctx := context.Background()
 

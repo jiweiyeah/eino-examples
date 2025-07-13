@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/cloudwego/eino-ext/devops"
 	"io"
 	"log"
 	"net/http"
@@ -84,6 +85,13 @@ var upgrader = websocket.Upgrader{
 
 func main() {
 	ctx := context.Background()
+
+	// 初始化 eino devops 服务
+	err := devops.Init(ctx)
+	if err != nil {
+		logs.Errorf("[eino dev] 初始化失败, err=%v", err)
+		return
+	}
 
 	// 编译工作流图
 	workflow, err := graph.NewConditionalRewriterGraphStream(ctx)
@@ -214,6 +222,7 @@ func handleChatRequest(ctx context.Context, conn *websocket.Conn, workflow compo
 			logs.Errorf("从流中接收数据时出错, err: %v", err)
 			break
 		}
+		log.Println("chunk:", chunk)
 
 		// 发送WebSocket消息
 		response := map[string]interface{}{
@@ -341,4 +350,3 @@ func handleLoadChat(conn *websocket.Conn, id string) {
 		logs.Errorf("发送聊天记录失败: %v", err)
 	}
 }
-

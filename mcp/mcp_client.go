@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
+	"log"
+
 	mcpp "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
-	"log"
 )
 
 // 创建 MCP 客户端并初始化，获取可用的工具列表

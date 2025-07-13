@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/joho/godotenv"
 	"log"
 	"os"
 	"time"
@@ -32,19 +33,23 @@ import (
 
 	"github.com/cloudwego/eino-examples/quickstart/eino_assistant/cmd/einoagent/agent"
 	"github.com/cloudwego/eino-examples/quickstart/eino_assistant/cmd/einoagent/task"
-	"github.com/cloudwego/eino-examples/quickstart/eino_assistant/pkg/env"
 )
 
 func init() {
+
 	if os.Getenv("EINO_DEBUG") != "false" {
 		err := devops.Init(context.Background())
 		if err != nil {
 			log.Printf("[eino dev] init failed, err=%v", err)
 		}
 	}
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Println("⚠️  .env 文件未找到或加载失败:", err)
+	}
 
 	// check some essential envs
-	env.MustHasEnvs("ARK_CHAT_MODEL", "ARK_EMBEDDING_MODEL", "ARK_API_KEY")
+	//env.MustHasEnvs("ARK_CHAT_MODEL", "ARK_EMBEDDING_MODEL", "ARK_API_KEY")
 }
 
 func main() {

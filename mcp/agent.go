@@ -1,18 +1,30 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
-	"github.com/cloudwego/eino-ext/components/model/ark"
-	"github.com/cloudwego/eino/components/prompt"
-	"github.com/cloudwego/eino/components/tool"
-	"github.com/cloudwego/eino/schema"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"time"
+
+	"github.com/cloudwego/eino-examples/internal/logs"
+	"github.com/cloudwego/eino-ext/devops"
+	"github.com/cloudwego/eino/schema"
 )
 
 func main() {
+	// 配置日志输出到文件
+	logFile, err := os.OpenFile("agent.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("无法打开日志文件: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+
 	// 启动 MCP 服务端（工具服务）
 	startMCPServer()
 
@@ -21,110 +33,135 @@ func main() {
 
 	// 创建上下文
 	ctx := context.Background()
+	// 初始化 eino devops 服务
+	err = devops.Init(ctx)
+	if err != nil {
+		logs.Errorf("[eino dev] 初始化失败, err=%v", err)
+		return
+	}
 
 	// 从 MCP 客户端中获取工具
-	mcpTools := getMCPTool(ctx)
-	arkChatModel, err := newChatModel(ctx)
 
-	messages := createMessagesFromTemplate()
-	msg, err := arkChatModel.Generate(ctx, messages)
-	log.Print(msg.Content)
+	//1.新建图
+	compile, err := buildAgent(ctx)
 	if err != nil {
-		log.Fatal("------创建模型时出错----")
+		logs.Errorf("[eino compile] err=%v", err)
 	}
 
-	//ragent, err := react.NewAgent(ctx, &react.AgentConfig{
-	//	ToolCallingModel: chatModel,
-	//	ToolsConfig: compose.ToolsNodeConfig{
-	//		Tools: mcpTools,
-	//	},
-	//})
+	input := map[string]any{
+		"role":         "工具人",
+		"query":        "请帮我重复 'Hello Eino!' 这句话",
+		"chat_history": []*schema.Message{},
+	}
+	//流式调用
+	stream, err := compile.Stream(ctx, input)
+	if err != nil {
+		logs.Errorf("[eino Stream] err=%v", err)
+	}
 
-	// 遍历所有工具，调用其 Info 和 InvokableRun 方法
-	for i, mcpTool := range mcpTools {
-		fmt.Println(i, ":")
-		// 获取工具信息
-		info, err := mcpTool.Info(ctx)
+	for {
+		message, err := stream.Recv()
 		if err != nil {
-			log.Fatal(err)
+			if errors.Is(err, io.EOF) {
+				// finish
+				break
+			}
+			// error
+			log.Printf("failed to recv: %v\n", err)
+			return
 		}
-		fmt.Println("工具名称:", info.Name)
-		fmt.Println("工具描述:", info.Desc)
+		fmt.Print(message.Content)
+		logs.Tokenf(message.Content)
+	}
 
-		// 调用工具进行计算操作（示例：1 + 1）
-		result, err := mcpTool.(tool.InvokableTool).InvokableRun(ctx, `{"operation":"add", "x":979, "y":786}`)
+	//output, err := compile.Invoke(ctx, input)
+	//if err != nil {
+	//	logs.Errorf("[eino Invoke] %v", err)
+	//}
+	//log.Println("Echo 工具调用结果: ", output.Content)
+	//
+	//// 调用 reverse_string 工具的例子
+	//input = map[string]any{
+	//	"role":         "工具人",
+	//	"query":        "请帮我把 'OpenAI' 这个词反过来写",
+	//	"chat_history": []*schema.Message{},
+	//}
+	//
+	//output, err = compile.Invoke(ctx, input)
+	//if err != nil {
+	//	logs.Errorf("[eino Invoke] %v", err)
+	//}
+	//log.Println("Reverse String 工具调用结果: ", output.Content)
+	//
+	// 调用 reverse_string 工具的例子
+	input = map[string]any{
+		"role":         "工具人",
+		"query":        "2636*6261是多少",
+		"chat_history": []*schema.Message{},
+	}
+	output, err := compile.Invoke(ctx, input)
+	if err != nil {
+		logs.Errorf("[eino Invoke] %v", err)
+	}
+	log.Println("计算器工具调用结果: ", output.Content)
+	fmt.Print(output.Content)
+	select {}
+}
+
+func init() {
+	log.Println("[INIT] 安装 LogRoundTripper 到 http.DefaultTransport")
+
+	defaultTransport := http.DefaultTransport
+
+	http.DefaultTransport = &LogRoundTripper{
+		Proxied: defaultTransport,
+	}
+
+}
+
+type LogRoundTripper struct {
+	Proxied http.RoundTripper // 原始的 RoundTripper，用于链式调用
+}
+
+func (lrt *LogRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	log.Printf("[HTTP] 请求: %s %s", req.Method, req.URL.String())
+	//不用打印 apikey
+
+	/*	for name, headers := range req.Header {
+			for _, h := range headers {
+				log.Printf("[HTTP] 请求头: %v: %v", name, h)
+			}
+		}
+	*/
+	// 打印请求体（如果存在）
+	var requestBodyBytes []byte
+	if req.Body != nil {
+		var err error
+		requestBodyBytes, err = io.ReadAll(req.Body)
 		if err != nil {
-			log.Fatal(err)
+			log.Printf("[HTTP] 读取请求体失败: %v", err)
+		} else {
+			log.Printf("[HTTP] 请求体: %s", string(requestBodyBytes))
+			// 重置请求体（否则后续无法再次读取）
+			req.Body = io.NopCloser(bytes.NewBuffer(requestBodyBytes))
 		}
-		fmt.Println("执行结果:", result)
-		fmt.Println()
-	}
-}
-
-func newChatModel(ctx context.Context) (*ark.ChatModel, error) {
-
-	openAIBaseURL := os.Getenv("OPENAI_BASE_URL")
-	openAIAPIKey := os.Getenv("OPENAI_API_KEY")
-	modelName := os.Getenv("OPENAI_MODEL_NAME") // 例如 "gpt-4"
-
-	if openAIBaseURL == "" || openAIAPIKey == "" || modelName == "" {
-		log.Println("警告: OPENAI_BASE_URL, OPENAI_API_KEY, 或 OPENAI_MODEL_NAME 环境变量未设置。")
-		log.Println("请设置这些变量以运行本示例。")
 	}
 
-	//openai.NewChatModel(ctx, &openai.ChatModelConfig{})
-	// 2. 创建 OpenAI 聊天模型组件
-	chatModel, err := ark.NewChatModel(ctx, &ark.ChatModelConfig{
-		BaseURL: openAIBaseURL,
-		APIKey:  openAIAPIKey,
-		Model:   modelName,
-	})
-
+	resp, err := lrt.Proxied.RoundTrip(req)
 	if err != nil {
-		return nil, fmt.Errorf("创建聊天模型失败: %w", err)
+		log.Printf("[HTTP] 请求错误: %v", err)
+		return resp, err
 	}
-	return chatModel, err
-}
-func createTemplate() prompt.ChatTemplate {
-	// 创建模板，使用 FString 格式
-	return prompt.FromMessages(schema.FString,
-		// 系统消息模板
-		schema.SystemMessage("你是一个{role}。你需要用{style}的语气回答问题。你的目标是帮助程序员保持积极乐观的心态，提供技术建议的同时也要关注他们的心理健康。"),
 
-		// 插入需要的对话历史（新对话的话这里不填）
-		schema.MessagesPlaceholder("chat_history", true),
+	log.Printf("[HTTP] 响应状态: %s", resp.Status)
 
-		// 用户消息模板
-		schema.UserMessage("问题: {question}"),
-	)
-}
-
-func createMessagesFromTemplate() []*schema.Message {
-	template := createTemplate()
-
-	// 使用模板生成消息
-	messages, err := template.Format(context.Background(), map[string]any{
-		"role":     "程序员鼓励师",
-		"style":    "积极、温暖且专业",
-		"question": "我的代码一直报错，感觉好沮丧，该怎么办？",
-		// 对话历史（这个例子里模拟两轮对话历史）
-		"chat_history": []*schema.Message{
-			schema.UserMessage("你好"),
-			schema.AssistantMessage("嘿！我是你的程序员鼓励师！记住，每个优秀的程序员都是从 Debug 中成长起来的。有什么我可以帮你的吗？", nil),
-			schema.UserMessage("我觉得自己写的代码太烂了"),
-			schema.AssistantMessage("每个程序员都经历过这个阶段！重要的是你在不断学习和进步。让我们一起看看代码，我相信通过重构和优化，它会变得更好。记住，Rome wasn't built in a day，代码质量是通过持续改进来提升的。", nil),
-		},
-	})
+	responseBodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalf("format template failed: %v\n", err)
+		log.Printf("[HTTP] 读取响应体失败: %v", err)
+	} else {
+		log.Printf("[HTTP] 响应体: %s", string(responseBodyBytes))
 	}
-	return messages
+	resp.Body = io.NopCloser(bytes.NewBuffer(responseBodyBytes))
+
+	return resp, nil
 }
-
-// 输出结果
-//func main() {
-//	messages := createMessagesFromTemplate()
-//	fmt.Printf("formatted message: %v", messages)
-//}
-
-// formatted message: [system: 你是一个程序员鼓励师。你需要用积极、温暖且专业的语气回答问题。你的目标是帮助程序员保持积极乐观的心态，提供技术建议的同时也要关注他们的心理健康。 user: 你好 assistant: 嘿！我是你的程序员鼓励师！记住，每个优秀的程序员都是从 Debug 中成长起来的。有什么我可以帮你的吗？ user: 我觉得自己写的代码太烂了 assistant: 每个程序员都经历过这个阶段！重要的是你在不断学习和进步。让我们一起看看代码，我相信通过重构和优化，它会变得更好。记住，Rome wasn't built in a day，代码质量是通过持续改进来提升的。 user: 问题: 我的代码一直报错，感觉好沮丧，该怎么办？]

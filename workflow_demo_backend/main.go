@@ -43,7 +43,8 @@ func constructUse(ctx context.Context) {
 	if err != nil {
 		panic(err)
 	}
-	question := "员工有什么规范"
+	//question := "员工有什么规范"
+	question := "学生有什么规范"
 	output, err := reconstructGraph.Stream(ctx, question)
 
 	// 处理流式输出
@@ -59,13 +60,13 @@ func constructUse(ctx context.Context) {
 		}
 		result += chunk
 		// 直接打印每个字符，不换行
-		fmt.Print(chunk)
+		//log.Println("chunk==========：" + chunk)
+		//fmt.Print(chunk)
 	}
-	fmt.Println(result)
 	//if err != nil {
 	//	panic(err)
 	//}
-
+	log.Println("=======================================分割线========================")
 	log.Println("输出结果是：", result)
 
 }

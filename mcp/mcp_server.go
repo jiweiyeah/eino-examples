@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+
 	_ "github.com/cloudwego/eino-ext/components/tool/mcp"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -55,8 +56,49 @@ func startMCPServer() {
 				}
 				result = x / y
 			}
-			log.Printf("计算结果: %.2f", result)
+			log.Printf("计算结果哈哈哈哈: %.2f", result)
 			return mcp.NewToolResultText(fmt.Sprintf("%.2f", result)), nil
+		},
+	)
+
+	// 添加一个名为 "echo" 的工具
+	svr.AddTool(
+		mcp.NewTool("echo",
+			mcp.WithDescription("返回输入的字符串"),
+			mcp.WithString("text",
+				mcp.Required(),
+				mcp.Description("要返回的字符串"),
+			),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			arg := request.Params.Arguments.(map[string]any)
+			text := arg["text"].(string)
+			log.Printf("Echo 工具收到: %s", text)
+			return mcp.NewToolResultText(text), nil
+		},
+	)
+
+	// 添加一个名为 "reverse_string" 的工具
+	svr.AddTool(
+		mcp.NewTool("reverse_string",
+			mcp.WithDescription("反转输入的字符串"),
+			mcp.WithString("input_string",
+				mcp.Required(),
+				mcp.Description("要反转的字符串"),
+			),
+		),
+		func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			arg := request.Params.Arguments.(map[string]any)
+			inputString := arg["input_string"].(string)
+
+			runes := []rune(inputString)
+			for i, j := 0, len(runes)-1; i < j; i, j = i+1, j-1 {
+				runes[i], runes[j] = runes[j], runes[i]
+			}
+			reversedString := string(runes)
+
+			log.Printf("反转字符串工具收到: %s, 返回: %s", inputString, reversedString)
+			return mcp.NewToolResultText(reversedString), nil
 		},
 	)
 

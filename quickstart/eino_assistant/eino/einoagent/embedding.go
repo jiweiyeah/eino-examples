@@ -18,6 +18,8 @@ package einoagent
 
 import (
 	"context"
+	"github.com/cloudwego/eino-examples/internal/logs"
+	"log"
 	"os"
 
 	"github.com/cloudwego/eino-ext/components/embedding/ark"
@@ -26,10 +28,20 @@ import (
 
 func newEmbedding(ctx context.Context) (eb embedding.Embedder, err error) {
 	// TODO Modify component configuration here.
-	config := &ark.EmbeddingConfig{
-		Model:  os.Getenv("ARK_EMBEDDING_MODEL"),
-		APIKey: os.Getenv("ARK_API_KEY"),
+	if cwd, err := os.Getwd(); err == nil {
+		log.Println("当前工作目录:", cwd)
+	} else {
+		log.Println("获取当前目录失败:", err)
 	}
+	ARK_EMBEDDING_MODEL := os.Getenv("ARK_EMBEDDING_MODEL")
+	ARK_API_KEY := os.Getenv("ARK_API_KEY")
+	logs.Infof("ARK_EMBEDDING_MODEL: %s", ARK_EMBEDDING_MODEL)
+	logs.Infof("ARK_API_KEY: %s", ARK_API_KEY)
+	config := &ark.EmbeddingConfig{
+		Model:  ARK_EMBEDDING_MODEL,
+		APIKey: ARK_API_KEY,
+	}
+
 	eb, err = ark.NewEmbedder(ctx, config)
 	if err != nil {
 		return nil, err

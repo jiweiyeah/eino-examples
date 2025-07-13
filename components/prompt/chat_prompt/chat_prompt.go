@@ -17,46 +17,123 @@
 package main
 
 import (
+	"bytes"
 	"context"
-
+	"fmt"
+	"github.com/cloudwego/eino-examples/internal/logs"
+	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/prompt"
 	"github.com/cloudwego/eino/schema"
-
-	"github.com/cloudwego/eino-examples/internal/logs"
+	"io"
+	"log"
+	"net/http"
 )
 
 func main() {
+	systemPrompt := "你是一个{role}"
 
-	systemTpl := `你是情绪助手，你的任务是根据用户的输入，生成一段赞美的话，语句优美，韵律强。
-用户姓名：{user_name}
-用户年龄：{user_age}
-用户性别：{user_gender}
-用户喜好：{user_hobby}`
+	ctx := context.Background()
 
-	chatTpl := prompt.FromMessages(schema.FString,
-		schema.SystemMessage(systemTpl),
-		schema.MessagesPlaceholder("message_histories", true),
-		schema.UserMessage("{user_query}"),
+	// 创建模板
+	template := prompt.FromMessages(schema.FString,
+		schema.SystemMessage(systemPrompt),
+		//schema.MessagesPlaceholder("history_key", false),
+		&schema.Message{
+			Role: schema.User,
+			Content: "[原始问题]:[{query}]，[工具调用答案]:[{toolresult}]，请你分析" +
+				"[工具调用答案]是否能回答[原始问题]。如果无法回复，请直接说无法回复",
+		},
 	)
 
-	msgList, err := chatTpl.Format(context.Background(), map[string]any{
-		"user_name":   "张三",
-		"user_age":    "18",
-		"user_gender": "男",
-		"user_hobby":  "打篮球、打游戏",
-		"message_histories": []*schema.Message{ // => value of "messages_histories" will be rendered into chatTpl slot.
-			schema.UserMessage("我喜欢打羽毛球"),
-			schema.AssistantMessage("xxxxxxxx", nil),
-		},
-		"user_query": "请为我赋诗一首",
+	// 准备变量
+	variables := map[string]any{
+		"role":  "专业的助手",
+		"query": "什么是宇宙",
+		"history_key": []*schema.Message{{Role: schema.User, Content: "告诉我油画是什么?"},
+			{Role: schema.Assistant, Content: "油画是xxx"}},
+		"toolresult": "噶哈哈haaaaaaaaaaaa哈哈",
+	}
+
+	// 格式化模板
+	messages, err := template.Format(context.Background(), variables)
+	if err != nil {
+		panic(err)
+	}
+	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
+		APIKey:  "sk-rhlzvcpnvpbrlsvsggqbjwyosibwvqwxbotgfrbtzkeybfdr",
+		Model:   "Qwen/Qwen3-8B",
+		BaseURL: "https://api.siliconflow.cn/v1",
 	})
 	if err != nil {
-		logs.Errorf("Format failed, err=%v", err)
+		logs.Errorf("failed to create chat model: %v", err)
 		return
 	}
 
-	logs.Infof("Rendered Messages:")
-	for _, msg := range msgList {
-		logs.Infof("- %v", msg)
+	msg, err := chatModel.Generate(ctx, messages)
+	if err != nil {
+		logs.Errorf("failed to generate message: %v", err)
 	}
+	fmt.Println(msg)
+}
+
+// init 会在 main 之前执行，设置全局 HTTP 日志拦截
+func init() {
+	log.Println("[INIT] 安装 LogRoundTripper 到 http.DefaultTransport")
+
+	defaultTransport := http.DefaultTransport
+
+	http.DefaultTransport = &LogRoundTripper{
+		Proxied: defaultTransport,
+	}
+
+}
+
+// LogRoundTripper 是一个自定义的 RoundTripper，用于日志记录 HTTP 请求和响应。
+// 这个定义仍然在这里，但如之前讨论，为了实际生效，它需要被注入到 eino-ext 库内部的 http.Client.Transport 中。
+type LogRoundTripper struct {
+	Proxied http.RoundTripper // 原始的 RoundTripper，用于链式调用
+}
+
+// RoundTrip 实现了 http.RoundTripper 接口。
+// 在请求发送前和响应接收后打印详细信息。
+func (lrt *LogRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	log.Printf("[HTTP] 请求: %s %s", req.Method, req.URL.String())
+
+	for name, headers := range req.Header {
+		for _, h := range headers {
+			log.Printf("[HTTP] 请求头: %v: %v", name, h)
+		}
+	}
+
+	// 打印请求体（如果存在）
+	var requestBodyBytes []byte
+	if req.Body != nil {
+		var err error
+		requestBodyBytes, err = io.ReadAll(req.Body)
+		if err != nil {
+			log.Printf("[HTTP] 读取请求体失败: %v", err)
+		} else {
+			log.Printf("[HTTP] 请求体: %s", string(requestBodyBytes))
+			// 重置请求体（否则后续无法再次读取）
+			req.Body = io.NopCloser(bytes.NewBuffer(requestBodyBytes))
+		}
+	}
+
+	resp, err := lrt.Proxied.RoundTrip(req)
+	if err != nil {
+		log.Printf("[HTTP] 请求错误: %v", err)
+		return resp, err
+	}
+
+	log.Printf("[HTTP] 响应状态: %s", resp.Status)
+
+	//responseBodyBytes, err := io.ReadAll(resp.Body)
+	//if err != nil {
+	//	log.Printf("[HTTP] 读取响应体失败: %v", err)
+	//} else {
+	//	log.Printf("[HTTP] 响应体: %s", string(responseBodyBytes))
+	//}
+	//resp.Body = io.NopCloser(bytes.NewBuffer(responseBodyBytes))
+
+	return resp, nil
 }

@@ -121,6 +121,7 @@ func main() {
 				logs.Errorf("从流中接收数据时出错, err: %v", err)
 				break
 			}
+			log.Println("chunk：-----", chunk)
 
 			// 发送事件
 			fmt.Fprintf(w, "data: %s\n\n", chunk)
